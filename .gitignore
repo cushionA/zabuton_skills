@@ -1,0 +1,35 @@
+# Claude Code のローカル設定（作業内容・許可済みコマンド等が入るので公開しない）
+.claude/settings.local.json
+.claude/*.local.json
+.claude/memory/
+.claude/todos/
+.claude/shell-snapshots/
+.claude/statsig/
+.claude/projects/
+.mcp.json
+CLAUDE.local.md
+
+# 認証情報・環境変数
+.env
+.env.*
+*.key
+*.pem
+
+# スキルが監視対象ディレクトリに作る設定・ログ（監視対象の実パスが入る）
+.slack-off-police.yaml
+*.slack-off-police.log
+slack-off-police.log
+
+# 音声素材（著作物を含みうるので同梱しない）
+slack-off-police/assets/*
+!slack-off-police/assets/README.md
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS
+Thumbs.db
+desktop.ini
