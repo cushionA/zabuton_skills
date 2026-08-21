@@ -33,3 +33,7 @@ venv/
 # OS
 Thumbs.db
 desktop.ini
+
+# research-repro-radar の実行状態（既報ID・繰り越しキュー・送信履歴）。個人の実行履歴なので公開しない。
+research-repro-radar/state/*
+!research-repro-radar/state/.gitkeep

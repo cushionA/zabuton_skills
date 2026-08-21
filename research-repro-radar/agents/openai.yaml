@@ -1,0 +1,4 @@
+interface:
+  display_name: "Research Repro Radar"
+  short_description: "話題の研究を短時間で試し、面白いものだけメールで報告"
+  default_prompt: "$research-repro-radar で最近話題の研究を拾い、大きな効果や深掘り価値があるものを簡易検証してください。"

@@ -1,0 +1,279 @@
+{
+  "profile_version": 5,
+  "language": "ja",
+  "style": "casual",
+  "workload": {
+    "label": "大量のスクレイピングデータを低コストで処理する",
+    "traits": [
+      "件数が多い",
+      "入力が雑で不揃い",
+      "1件あたりの価値が低い",
+      "GPUなし",
+      "レイテンシよりスループット"
+    ],
+    "note": "検索語として使わない。実例がスクレイピングでなくてよい。手法がこの条件に耐えるかで刺さり方を判断し、報告時に必ずこのワークロードへ当てはめた見立てを書く。"
+  },
+  "cost_model": {
+    "note": "CPU限定は目的ではなく、API課金より安くするための手段。明確な根拠があれば制約を破る提案をしてよい。ただし自動で課金はしない。",
+    "api_baseline": {
+      "source": "Anthropic API 一次価格（2026-06-24時点）。為替と価格は変わるので鵜呑みにせず、大きな判断の前に再確認する。",
+      "models": [
+        {
+          "model": "claude-haiku-4-5",
+          "input_usd_per_mtok": 1.0,
+          "output_usd_per_mtok": 5.0
+        },
+        {
+          "model": "claude-sonnet-5",
+          "input_usd_per_mtok": 3.0,
+          "output_usd_per_mtok": 15.0
+        }
+      ],
+      "batch_discount": 0.5,
+      "reference_point": {
+        "items": 10000,
+        "input_tokens_per_item": 1000,
+        "output_tokens_per_item": 50,
+        "cheapest_usd": 6.25,
+        "note": "Haiku 4.5 + Batch API。1万件で約$6.25（約940円）。これが『安い』の基準線。"
+      }
+    },
+    "where_local_wins": [
+      "分類・構造化抽出のように出力が短くencoderで足りるタスク（ローカルが桁で安い）",
+      "件数が基準点より1桁以上多い",
+      "データを外に出せない",
+      "オフラインまたは低レイテンシが要る"
+    ],
+    "where_api_wins": [
+      "要約・生成のように出力が長いタスク",
+      "件数が少なく、開発時間のほうが高くつく",
+      "品質要求が高くローカル小型モデルでは届かない"
+    ],
+    "override_policy": "GPUや有料が必要でも、(1)基準点との試算で明確に安い、または(2)量子化・蒸留でCPUへ寄せられる具体的な見込みがある、のどちらかを示せるなら『深掘り価値』として報告してよい。試算の前提（件数、トークン数、価格の出典）を必ず併記する。課金の実行はユーザーの承認を得る。"
+  },
+  "lookback_days": 14,
+  "interests": [
+    {
+      "id": "nlp_summary_classification",
+      "label": "自然言語処理の要約と分類",
+      "weight": 5,
+      "keywords": [
+        "summarization",
+        "text classification",
+        "document classification",
+        "要約",
+        "文書分類",
+        "テキスト分類",
+        "distillation",
+        "quantization",
+        "efficient transformer"
+      ]
+    },
+    {
+      "id": "information_extraction",
+      "label": "雑なテキストからの構造化抽出",
+      "weight": 5,
+      "keywords": [
+        "information extraction",
+        "structured extraction",
+        "key information extraction",
+        "named entity recognition",
+        "entity extraction",
+        "web information extraction",
+        "wrapper induction",
+        "boilerplate removal",
+        "noisy text",
+        "document understanding",
+        "情報抽出",
+        "構造化抽出",
+        "固有表現抽出"
+      ]
+    },
+    {
+      "id": "vision_pattern_recognition",
+      "label": "画像などのパターン認識",
+      "weight": 4,
+      "keywords": [
+        "pattern recognition",
+        "image classification",
+        "object detection",
+        "computer vision",
+        "visual recognition",
+        "画像分類",
+        "物体検出",
+        "lightweight vision"
+      ]
+    },
+    {
+      "id": "cpu_small_models",
+      "label": "CPUでも動く小型モデル",
+      "weight": 6,
+      "keywords": [
+        "small model",
+        "compact model",
+        "lightweight model",
+        "on-device",
+        "edge inference",
+        "cpu inference",
+        "onnx",
+        "gguf",
+        "int8",
+        "int4",
+        "quantized",
+        "小型モデル",
+        "量子化",
+        "small language model",
+        "compact language model",
+        "sub-billion",
+        "batch inference",
+        "throughput",
+        "pruning",
+        "軽量言語モデル",
+        "小型言語モデル"
+      ]
+    },
+    {
+      "id": "ai_driven_development",
+      "label": "コーディングエージェントによるAI駆動開発",
+      "weight": 6,
+      "keywords": [
+        "coding agent",
+        "software engineering agent",
+        "agentic coding",
+        "ai-driven development",
+        "automated software engineering",
+        "repository-level",
+        "swe-bench",
+        "code agent",
+        "コーディングエージェント",
+        "AI駆動開発"
+      ]
+    }
+  ],
+  "taste_anchors": [
+    {
+      "name": "KNN-VC",
+      "signal": "比較的単純な構成で実用的な結果を出す"
+    },
+    {
+      "name": "Qwen3.5",
+      "signal": "新しいアーキテクチャと能力・効率の両立"
+    },
+    {
+      "name": "BERT",
+      "signal": "再利用しやすく下流タスク評価が明確"
+    }
+  ],
+  "sources": [
+    {
+      "name": "huggingface",
+      "priority": 5,
+      "enabled": true
+    },
+    {
+      "name": "openreview",
+      "priority": 4,
+      "enabled": true
+    },
+    {
+      "name": "arxiv",
+      "priority": 4,
+      "enabled": true
+    },
+    {
+      "name": "mdpi",
+      "priority": 3,
+      "enabled": true
+    },
+    {
+      "name": "github",
+      "priority": 3,
+      "enabled": true
+    },
+    {
+      "name": "crossref",
+      "priority": 2,
+      "enabled": true
+    }
+  ],
+  "constraints": {
+    "money_budget_jpy": 0,
+    "run_time_budget_minutes": 30,
+    "max_cpu_minutes_per_candidate": 20,
+    "max_ram_gb": 8,
+    "max_download_gb": 2,
+    "max_automatic_repair_attempts": 1,
+    "max_carry_over_days": 28,
+    "gpu": {
+      "enabled": false,
+      "provider": "kaggle",
+      "max_hours_per_candidate": 1
+    }
+  },
+  "notability": {
+    "large_effect": {
+      "minimum_relative_quality_improvement": 0.05,
+      "quality_noninferiority_tolerance": 0.02,
+      "minimum_resource_reduction": 0.3
+    },
+    "deep_dive_value": {
+      "minimum_independent_hot_signals": 2,
+      "require_primary_artifact": true
+    }
+  },
+  "reporting": {
+    "channel": "email",
+    "recipient_env": "RESEARCH_RADAR_EMAIL_TO",
+    "digest_enabled": true,
+    "digest_max_items": 15,
+    "heartbeat_days": 14
+  },
+  "deployment": {
+    "note": "本番はGKE/AWSなどのクラウドに置く想定。ローカルと違いvCPU時間が課金対象なので「CPUだから安い」は成立しない。CPUかGPUかではなく、スループット÷単価で判断する。",
+    "targets": [
+      "gke",
+      "aws"
+    ],
+    "reference_rates": {
+      "source": "AWS us-east-1 オンデマンド（2026-08時点の調査値）。リージョン、commitment、spotで大きく変わるので実アカウントで再確認する。",
+      "instances": [
+        {
+          "name": "c7g.xlarge",
+          "kind": "cpu",
+          "vcpu": 4,
+          "usd_per_hour": 0.145
+        },
+        {
+          "name": "g5.xlarge",
+          "kind": "gpu",
+          "accelerator": "A10G",
+          "usd_per_hour": 1.006
+        }
+      ]
+    },
+    "break_even_vs_api": {
+      "note": "API基準線 $6.25/1万件 と等価になる処理速度。これより遅ければクラウドで動かすよりAPIのほうが安い。",
+      "c7g.xlarge": "15.5 秒/件",
+      "g5.xlarge": "2.2 秒/件"
+    },
+    "implications": [
+      "単価7倍でも50倍速いGPUのほうが安い。GPU必須を理由に切り捨てない。",
+      "CPUで1件15秒を超える手法は、クラウド本番ではAPIに負ける。ローカルで動いても本番では推奨しない。",
+      "常時起動よりバッチ実行とscale-to-zeroが効く。1日1回まとめて回せる設計かを見る。",
+      "spot/preemptibleが使えれば実効単価は数分の1。中断から再開できる設計かを見る。",
+      "モデル容量はコールドスタート時間とイメージサイズに効く。K8sでは特に。"
+    ]
+  },
+  "exploration": {
+    "note": "上位N件で機械的に切らない。広く集めて全件採点し、読んで吟味してから絞る。",
+    "min_candidates_gathered": 40,
+    "review_pool_size": 20,
+    "rules": [
+      "trendingの上位だけを取らない。trending全体、複数の検索クエリ、他ソースを合わせる。",
+      "採点は集めた全件に対して行う。件数で打ち切らない。",
+      "読解は実行より桁で安い。review_poolは実行できる件数よりずっと大きく取る。",
+      "GPU必須やRAM超過で実行できない候補も読解の対象にする。読むだけならコストは変わらない。",
+      "スコアは並べ替えの道具であって判断ではない。上位から順に読み、刺さらない理由を言えるものを落とす。"
+    ]
+  }
+}
