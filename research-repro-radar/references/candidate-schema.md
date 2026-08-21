@@ -19,7 +19,7 @@
 | フィールド | 型 | 既定 | 効果 |
 |---|---|---|---|
 | `abstract` | string | `""` | `title`と結合して関心キーワードの照合に使う |
-| `published_at` | ISO日付文字列 | なし | `lookback_days`超過は`outside_lookback`で除外。3日以内+3、7日以内+2、それ以降+1 |
+| `published_at` | ISO日付文字列 | なし | 鮮度加点のみに使う。年代を理由に除外しない。3日以内+3、7日以内+2、`lookback_days`以内+1、それ以降+0。`adaptive_freshness`が発動中はこの加点だけが`boost_multiplier`倍される |
 | `hot_signals` | 非負整数 または 文字列配列 | 0 | 配列なら大文字小文字を無視して重複排除した件数。最大4件までを1件あたり+2 |
 | `trend_rank` | 正整数 | なし | Hugging Face Papersのtrending順位。3位以内+5、10位以内+3、30位以内+1 |
 | `has_code` / `has_model` / `has_data` | boolean | `false` | それぞれ +4 / +3 / +2 |
@@ -35,7 +35,7 @@
 
 `--state-dir`を使うと、時間切れの候補が`queue.json`へ保存され次回の入力に自動で戻る。
 そのとき`carried_over_since`（最初に繰り越した日）と`carry_count`（繰り越し回数）が付く。
-手で書く必要はない。`carried_over_since`が付いた候補は`lookback_days`を過ぎても除外されない。
+手で書く必要はない。年代による除外は無いので、繰り越しは純粋に「まだ実行できていない」を表す。
 
 ## 例
 
@@ -65,7 +65,8 @@
 - `ranked_candidates`: 採点を通った候補をスコア降順で全件
 - `scheduled_checks`: そのうち実行時間予算に収まる分。ここまでが今回検証する対象
 - `deferred`: 予算切れ、GPU不可、CPU時間超過、RAM超過。`reason`に理由が入る
-- `rejected`: 対象外。`reason`は`invalid_record` `duplicate` `already_reported` `disabled_or_unknown_source` `not_relevant_or_hot` `outside_lookback` `cash_budget_exceeded`
+- `rejected`: 対象外。`reason`は`invalid_record` `duplicate` `already_reported` `disabled_or_unknown_source` `not_relevant_or_hot` `cash_budget_exceeded`。
+  年代だけを理由にした`rejected`は無い。話題性(`hot_signals`/`trend_rank`)も関心一致も無い候補が`not_relevant_or_hot`になる。
 
 `ranked_candidates`と`deferred`の`id`は重複排除キー（`doi` `arxiv_id` `id` `url` の優先順）に揃えてある。
 `report.json`の`recommended`と`digest`にはこの`id`をそのまま入れる。`seen.json`が同じキーで既報を覚えるため、

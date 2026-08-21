@@ -30,7 +30,9 @@ hf papers search "cpu inference throughput" --format=json
 ```
 
 trendingの上位数件だけを取って終わりにしない。trendingは全体を見て、新着とクエリ検索を必ず併用する。
-CLIやAPIの1ページに収まらない場合は、対象期間が尽きるまで日付指定またはページネーションを続ける。
+公開日は絞り込み条件にしない。何年前の論文・モデルでも、今trendingなら候補にする
+（PagedAttention、OpenDevin、TradingAgentsのような数年前の論文がtrending上位に居座ることは普通にある）。
+CLIやAPIの1ページに収まらない場合は、ページネーションを続ける。
 `exploration.min_candidates_gathered`に届かないなら、クエリを足すかソースを広げる。
 trending上位は関心語との一致が弱くてもワイルドカード候補になれる。モデルがある場合はModel Cardからライセンス、容量、推奨ハードウェアを確認する。
 

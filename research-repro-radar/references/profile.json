@@ -1,5 +1,5 @@
 {
-  "profile_version": 5,
+  "profile_version": 7,
   "language": "ja",
   "style": "casual",
   "workload": {
@@ -51,7 +51,14 @@
     ],
     "override_policy": "GPUや有料が必要でも、(1)基準点との試算で明確に安い、または(2)量子化・蒸留でCPUへ寄せられる具体的な見込みがある、のどちらかを示せるなら『深掘り価値』として報告してよい。試算の前提（件数、トークン数、価格の出典）を必ず併記する。課金の実行はユーザーの承認を得る。"
   },
-  "lookback_days": 14,
+  "lookback_days": 7,
+  "adaptive_freshness": {
+    "note": "年代フィルタは撤廃済み(古くても今trendingなら拾う)。ただし『掘り起こし』ばかりで新しい理論が入ってこなくなったら、鮮度加点を自動で強めて新しい候補を優先する。新しい深掘り候補が戻れば直近の実績比率が上がり、次回以降は自然に緩む。本当に話題性が突出した古い論文は、boost中でもtrend_rank/hot_signalsの加点で拾える。",
+    "fresh_within_days": 30,
+    "stale_trigger_runs": 3,
+    "stale_trigger_max_fresh_ratio": 0.34,
+    "boost_multiplier": 5
+  },
   "interests": [
     {
       "id": "nlp_summary_classification",

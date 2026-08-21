@@ -34,6 +34,7 @@ def required_env(name):
 
 def main():
     state.force_utf8_stdio()
+    skill_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser()
     parser.add_argument("report")
     parser.add_argument("body")
@@ -41,8 +42,13 @@ def main():
     parser.add_argument("--state-dir", required=True)
     parser.add_argument("--digest-limit", type=int, default=15)
     parser.add_argument("--heartbeat-days", type=int, default=0)
+    parser.add_argument("--profile", default=str(skill_root / "references" / "profile.json"))
+    parser.add_argument("--today")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+
+    profile = json.loads(Path(args.profile).read_text(encoding="utf-8"))
+    today_date = dt.date.fromisoformat(args.today) if args.today else dt.date.today()
 
     report = json.loads(Path(args.report).read_text(encoding="utf-8"))
     recommended = report.get("recommended")
@@ -68,7 +74,7 @@ def main():
         ids.append(str(item["id"]))
 
     mail_state = state.load_mail(args.state_dir)
-    today = dt.date.today().isoformat()
+    today = today_date.isoformat()
     if recommended:
         tier = "detailed"
         default_subject = f"[Research Repro Radar] 今週の注目研究 {len(recommended)}件"
@@ -128,6 +134,8 @@ def main():
     # ダイジェストは「まだ検証していない」印なので既報にしない。既報にすると
     # 次回キューに残した候補が二度と拾われなくなる。
     state.record_seen(args.state_dir, recommended, tier)
+    fresh_within_days = int(profile.get("adaptive_freshness", {}).get("fresh_within_days", 30))
+    state.record_freshness(args.state_dir, recommended, today_date, fresh_within_days)
     print(json.dumps({"sent": True, "tier": tier, "recommended_count": len(recommended), "digest_count": len(digest_items), "fingerprint": fingerprint}))
 
 

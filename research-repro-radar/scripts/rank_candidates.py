@@ -54,12 +54,13 @@ def hot_count(value):
     raise ValueError("hot_signals must be a non-negative integer or array")
 
 
-def age_bonus(record, today, lookback_days):
+def age_bonus(record, today, freshness_window_days):
+    # 鮮度は加点だけに使う。年代を理由に候補を落とさない。
+    # 何年前の論文でも今trendingなら拾う。関連性・話題性のゲートは score() 側の
+    # topic_hits / hot_signals / trend_rank だけが担う。
     published_at = record.get("published_at")
     if not published_at:
         return 0
-    # 繰り越した候補は lookback を過ぎても落とさない。落とすと次回キューが意味を失う。
-    carried_over = bool(record.get("carried_over_since"))
     if not isinstance(published_at, str):
         raise ValueError("published_at must be an ISO date string")
     parsed = dt.datetime.fromisoformat(published_at.replace("Z", "+00:00"))
@@ -68,12 +69,16 @@ def age_bonus(record, today, lookback_days):
     age = (today - parsed.date()).days
     if age < 0:
         raise ValueError("published_at is in the future")
-    if age > lookback_days:
-        return 0 if carried_over else -3
-    return 3 if age <= 3 else 2 if age <= 7 else 1
+    if age <= 3:
+        return 3
+    if age <= 7:
+        return 2
+    if age <= freshness_window_days:
+        return 1
+    return 0
 
 
-def score(record, profile, today, key):
+def score(record, profile, today, key, freshness_multiplier=1.0):
     title = required_text(record, "title")
     source = required_text(record, "source").casefold()
     url = required_text(record, "url")
@@ -130,11 +135,13 @@ def score(record, profile, today, key):
             reasons.append(f"{field}+{bonus}")
 
     recency = age_bonus(record, today, profile["lookback_days"])
-    if recency < 0:
-        return "rejected", {"id": key, "title": title, "reason": "outside_lookback"}
-    total += recency
-    if recency:
-        reasons.append(f"recency+{recency}")
+    boosted_recency = round(recency * freshness_multiplier, 2)
+    total += boosted_recency
+    if boosted_recency:
+        tag = f"recency+{boosted_recency:g}"
+        if freshness_multiplier != 1.0:
+            tag += f"(freshness_boost x{freshness_multiplier:g})"
+        reasons.append(tag)
     estimated_cost = optional_number(record, "estimated_cost_jpy") or 0
     if estimated_cost < 0:
         raise ValueError("estimated_cost_jpy cannot be negative")
@@ -158,6 +165,7 @@ def score(record, profile, today, key):
         "title": title,
         "source": source,
         "url": url,
+        "published_at": record.get("published_at"),
         "score": round(total, 2),
         "mode": mode,
         "topic_hits": topic_hits,
@@ -196,6 +204,17 @@ def main():
 
     profile = json.loads(Path(args.profile).read_text(encoding="utf-8"))
     today = dt.date.fromisoformat(args.today) if args.today else dt.date.today()
+
+    # 掘り起こし(古い論文)ばかりで新しい理論が入ってこなくなったら、鮮度加点を自動で強める。
+    # 新しい深掘り候補が戻れば直近の実績比率が上がり、次回以降は自然に緩む。
+    af = profile.get("adaptive_freshness")
+    freshness_multiplier = 1.0
+    freshness_ratio = None
+    if af and args.state_dir:
+        freshness_ratio = state.freshness_ratio(args.state_dir, af["stale_trigger_runs"])
+        if freshness_ratio is not None and freshness_ratio < af["stale_trigger_max_fresh_ratio"]:
+            freshness_multiplier = float(af["boost_multiplier"])
+
     eligible = []
     deferred = []
     rejected = []
@@ -232,7 +251,7 @@ def main():
             continue
         raw_by_key[key] = record
         try:
-            status, item = score(record, profile, today, key)
+            status, item = score(record, profile, today, key, freshness_multiplier)
         except ValueError as exc:
             rejected.append({"id": key, "title": record.get("title"), "reason": "invalid_record", "detail": str(exc)})
             continue
@@ -276,6 +295,11 @@ def main():
 
     output = {
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "freshness_boost": {
+            "active": freshness_multiplier != 1.0,
+            "multiplier": freshness_multiplier,
+            "recent_fresh_ratio": freshness_ratio,
+        },
         "profile_version": profile["profile_version"],
         "counts": {
             "input": len(records),

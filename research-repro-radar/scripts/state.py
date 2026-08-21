@@ -6,6 +6,7 @@ from pathlib import Path
 
 SEEN_RETENTION_DAYS = 365
 SEEN_MAX_ENTRIES = 2000
+FRESHNESS_HISTORY_MAX = 30
 
 
 def force_utf8_stdio():
@@ -105,6 +106,55 @@ def save_queue(state_dir, records, today):
         stamped.append(item)
     _write(Path(state_dir) / "queue.json", {"version": 1, "candidates": stamped})
     return len(stamped)
+
+
+def _parse_date(value):
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(dt.timezone.utc).replace(tzinfo=None)
+    return parsed.date()
+
+
+def record_freshness(state_dir, items, today, fresh_within_days):
+    # 「有用な深掘り候補が掘り起こし(古い論文)ばかりになっていないか」を実行ごとに記録する。
+    # published_at が無い項目は分母にも分子にも数えない(判定不能なだけで、stale扱いにはしない)。
+    value = _read(Path(state_dir) / "freshness.json", {"version": 1, "history": []})
+    history = value.get("history")
+    if not isinstance(history, list):
+        raise ValueError("freshness.json must contain a history array")
+    total = 0
+    fresh = 0
+    for item in items:
+        published = _parse_date(item.get("published_at"))
+        if published is None:
+            continue
+        total += 1
+        if (today - published).days <= fresh_within_days:
+            fresh += 1
+    history.append({"run_at": today.isoformat(), "recommended_total": total, "recommended_fresh": fresh})
+    history = history[-FRESHNESS_HISTORY_MAX:]
+    _write(Path(state_dir) / "freshness.json", {"version": 1, "history": history})
+    return fresh, total
+
+
+def freshness_ratio(state_dir, window_runs):
+    # 直近 window_runs 回ぶんの実績が無ければ判定しない(None)。判定できるだけの
+    # 履歴が無いうちにブーストを掛けると、初回実行から誤ってブーストがかかる。
+    value = _read(Path(state_dir) / "freshness.json", {"version": 1, "history": []})
+    history = value.get("history")
+    if not isinstance(history, list) or len(history) < window_runs:
+        return None
+    recent = history[-window_runs:]
+    total = sum(int(entry.get("recommended_total") or 0) for entry in recent)
+    fresh = sum(int(entry.get("recommended_fresh") or 0) for entry in recent)
+    if total == 0:
+        return 0.0
+    return fresh / total
 
 
 def load_mail(state_dir):
