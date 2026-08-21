@@ -1,9 +1,12 @@
 name: research-repro-radar
 
 on:
-  schedule:
-    # 毎週月曜 07:00 JST (UTC日曜 22:00)
-    - cron: "0 22 * * 0"
+  # schedule は一旦停止中。対話実行(claude -pでの都度実行)を主体にする方針に切り替えたため。
+  # SMTP認証(Outlook個人アカウントのBasic Auth廃止問題)を解決したら再開する。
+  # 再開時は下のコメントを外すだけでよい。
+  # schedule:
+  #   # 毎週月曜 07:00 JST (UTC日曜 22:00)
+  #   - cron: "0 22 * * 0"
   workflow_dispatch:
     inputs:
       dry_run:
