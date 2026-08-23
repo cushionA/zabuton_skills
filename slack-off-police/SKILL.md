@@ -10,7 +10,6 @@ description: >
   作業テーマと照らし、本当にサボりかを判定させたうえで、煽り文のポップアップ表示＋音声再生＋
   プロセスの強制終了を行う。Windows環境専用。「サボり監視」「勉強サボり」「進捗チェック 強制終了」
   「distraction blocker」「self-control app kill process」のような文脈でも積極的にこのスキルを使うこと。
-compatibility: Windows のみ。Python 3.9+、pywin32 / psutil / pyyaml が必要。サボり判定に claude CLI または codex CLI を使う（任意）。
 ---
 
 # サボり警察 (slack-off-police)
@@ -91,7 +90,8 @@ kill対象のウィンドウが開いていなくても、作業の痕跡が無�
 
 ## 手順1: 依存関係の確認
 
-初回のみ、ユーザーの環境に以下が入っているか確認し、無ければインストールを提案する。
+Windows専用。初回のみ、ユーザーの環境に Python 3.9以上と以下のパッケージが入っているか確認し、
+無ければインストールを提案する。
 
 ```bash
 pip install psutil pywin32 pyyaml
