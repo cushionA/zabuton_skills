@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex CLI Headless"
+  short_description: "Codex CLIの非対話実行と構造化出力を安全に自動化"
+  default_prompt: "$codex-cli-headless を使って、Codex CLIを非対話で安全に呼び出すコードを作成してください。"
