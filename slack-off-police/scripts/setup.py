@@ -21,7 +21,7 @@ def main():
         "--progress", default="git_diff", choices=["git_diff", "mtime"],
         help="進捗の証拠にする方法"
     )
-    parser.add_argument("--interval", type=int, default=15, help="判定間隔(分)")
+    parser.add_argument("--interval", type=int, default=10, help="判定間隔(分)")
     parser.add_argument(
         "--targets", required=True,
         help="カンマ区切りのサボり対象キーワード（例: YouTube,Steam,Twitch）"

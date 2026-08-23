@@ -8,7 +8,7 @@ CONFIG_FILENAME = ".slack-off-police.yaml"
 
 DEFAULTS = {
     "progress_method": "git_diff",
-    "interval_min": 15,
+    "interval_min": 10,
     "work_theme": "",
     "use_llm": True,
     "warn_first": True,

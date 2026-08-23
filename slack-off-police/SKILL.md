@@ -67,7 +67,7 @@ Claude Code と Codex CLI のどちらから使ってもよい。**判定に使�
 それ自体では見逃しにならない。空行を1行足しただけの変更は進捗とみなされず、差分ごと判定器に回る。
 
 kill対象のウィンドウが開いていなくても、作業の痕跡が無ければ警告は出る（落とす相手が無いので警告だけ）。
-判定は毎サイクル1回LLMを呼ぶので、15分間隔なら1時間あたり4回。エディタを閉じている間は呼ばない。
+判定は毎サイクル1回LLMを呼ぶので、10分間隔なら1時間あたり6回。エディタを閉じている間は呼ばない。
 
 **コードを1行も書いていなくてもサボりとは限らない**ので、判定器には次の7ブロックを渡し、
 「いま何をしているか」を推定させたうえでサボりかどうかを判定させる。
@@ -110,7 +110,7 @@ pip install psutil pywin32 pyyaml
    - サボり判定器がこれを基準に「その動画は作業に関係あるか」を判断する。必ず聞くこと
 3. 進捗の証拠にする方法: `git_diff`（gitリポジトリの差分/コミット） or `mtime`（ファイル更新日時のみ）
    - 特に指定が無ければ `git_diff` を提案（gitが無ければ自動でmtimeにフォールバックする実装になっている）
-4. 判定間隔（分）。特に指定が無ければ15分を提案
+4. 判定間隔（分）。特に指定が無ければ10分を提案
 5. **落としていい対象**（アプリ名やサイト名。カンマ区切りで複数可。例: `YouTube,Steam,Twitch`）
    - ここは必ずユーザー自身に明言させること。エージェント側で勝手に対象を広げない
    - `X` のような1〜2文字のキーワードは誤爆しやすいので、指定されたら一度確認する
@@ -128,10 +128,10 @@ pip install psutil pywin32 pyyaml
 
 ```bash
 # Claude Code から使う場合
-python <skill-path>/scripts/setup.py --dir "<対象ディレクトリ>" --agent claude --progress git_diff --interval 15 --targets "YouTube,Steam" --theme "<作業テーマ>"
+python <skill-path>/scripts/setup.py --dir "<対象ディレクトリ>" --agent claude --progress git_diff --interval 10 --targets "YouTube,Steam" --theme "<作業テーマ>"
 
 # Codex から使う場合
-python <skill-path>/scripts/setup.py --dir "<対象ディレクトリ>" --agent codex --progress git_diff --interval 15 --targets "YouTube,Steam" --theme "<作業テーマ>"
+python <skill-path>/scripts/setup.py --dir "<対象ディレクトリ>" --agent codex --progress git_diff --interval 10 --targets "YouTube,Steam" --theme "<作業テーマ>"
 ```
 
 主なオプション:
@@ -304,5 +304,5 @@ Copy-Item -Recurse -Force "<skill-path>\vscode-extension" $dest
 - エディタやワークスペースが見つからない場合は `None` を返す。監視ループは今までどおり git 差分だけで動く
 
 判定1回あたり10〜20秒、各CLIのサブスク枠を消費する（API課金ではない）。
-毎サイクル呼ぶので、15分間隔・8時間の作業で30回強。エディタを閉じている間は呼ばない。
+毎サイクル呼ぶので、10分間隔・8時間の作業で48回。エディタを閉じている間は呼ばない。
 `--no-llm` を指定すると判定器を使わず、進捗または操作履歴があれば見逃し、無ければ警告になる。
