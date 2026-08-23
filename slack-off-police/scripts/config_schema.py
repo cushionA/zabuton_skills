@@ -13,6 +13,13 @@ DEFAULTS = {
     "use_llm": True,
     "warn_first": True,
     "min_lines": 3,
+    # どちらのエージェントのCLIで判定するか: claude / codex / auto
+    "agent": "auto",
+    "model": None,
+    "use_vscode": True,
+    "chat_text": True,
+    "rules": "",
+    "editor_gate": True,
 }
 
 
@@ -21,7 +28,8 @@ def config_path_for(dir_path):
 
 
 def save_config(dir_path, progress_method, interval_min, targets,
-                work_theme="", use_llm=True, warn_first=True, min_lines=3):
+                work_theme="", use_llm=True, warn_first=True, min_lines=3,
+                agent="auto", model=None, use_vscode=True, chat_text=True, rules="", editor_gate=True):
     """
     設定を対象ディレクトリ直下に保存する。既存ファイルがあれば上書きする。
     """
@@ -34,6 +42,12 @@ def save_config(dir_path, progress_method, interval_min, targets,
         "use_llm": use_llm,
         "warn_first": warn_first,
         "min_lines": min_lines,
+        "agent": agent,
+        "model": model,
+        "use_vscode": use_vscode,
+        "chat_text": chat_text,
+        "rules": rules,
+        "editor_gate": editor_gate,
     }
     path = config_path_for(dir_path)
     with open(path, "w", encoding="utf-8") as f:

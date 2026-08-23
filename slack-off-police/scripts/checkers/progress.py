@@ -72,8 +72,9 @@ def git_progress(dir_path, since_timestamp, min_lines):
         # git diff は時刻を持たないので、変更ファイルのmtimeで絞らないと
         # 一度でも未コミット差分ができた時点で永久に「進捗あり」になってしまう。
         changed, untracked = _changed_files(dir_path)
-        if _touched_since(dir_path, untracked, since_timestamp):
-            return True, ""
+        new_files = _touched_since(dir_path, untracked, since_timestamp)
+        if new_files:
+            return True, "新規ファイル: " + ", ".join(new_files[:10])
 
         files = _touched_since(dir_path, changed, since_timestamp)
         if not files:

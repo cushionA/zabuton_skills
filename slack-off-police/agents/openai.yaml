@@ -1,0 +1,4 @@
+interface:
+  display_name: "サボり警察"
+  short_description: "進捗と指定アプリを監視して警告・強制終了を設定"
+  default_prompt: "$slack-off-police を使って、作業をサボったときの監視と警告を設定してください。"

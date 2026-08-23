@@ -1,0 +1,46 @@
+{
+  "name": "slack-off-police-watcher",
+  "displayName": "Slack-off Police Watcher",
+  "description": "サボり警察に、VS Code上の閲覧・編集イベントをJSONLで渡すだけの拡張機能",
+  "publisher": "local",
+  "version": "0.1.0",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "slackOffPolice.showLog",
+        "title": "サボり警察: 活動ログを開く"
+      }
+    ],
+    "configuration": {
+      "title": "Slack-off Police Watcher",
+      "properties": {
+        "slackOffPolice.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "活動ログの記録を有効にする"
+        },
+        "slackOffPolice.logPath": {
+          "type": "string",
+          "default": "",
+          "description": "活動ログの出力先。空なら ~/.slack-off-police/vscode-activity.jsonl"
+        },
+        "slackOffPolice.throttleSeconds": {
+          "type": "number",
+          "default": 30,
+          "description": "同じファイル・同じ種別のイベントをまとめる間隔（秒）"
+        }
+      }
+    }
+  }
+}
