@@ -6,8 +6,19 @@
 
 | スキル | 概要 | 対応環境 |
 | --- | --- | --- |
+| [simple-plan-auditor](simple-plan-auditor/) | 長大なPlanを「全体作業マップ → 必要箇所の詳細」という形に整理し、手順・依存・確認事項の抜けを人間が確認しやすくする | 全OS |
+| [simple-plan-auditor-en](simple-plan-auditor-en/) | Simple Plan Auditor の英語版。英語のPlanを同じ考え方で整理・監査する | 全OS |
 | [slack-off-police](slack-off-police/) | 作業ディレクトリの進捗を定期チェックし、サボっていたらYouTube等のプロセスを強制終了する | Windows |
 | [claude-cli-headless](claude-cli-headless/) | `claude -p` をスクリプトから呼ぶときの罠（引数の壊れ方・インジェクション対策・出力パース）をまとめた参照用スキル | 全OS |
+
+## Simple Plan Auditor
+
+AIが作る詳細なPlanは、実行には便利でも人間が全体を監督するには長くなりがちです。
+
+Simple Plan Auditor は、技術詳細を残したまま、人間向けに **目的 / 全体作業マップ / 要注意事項・人間判断 / 重要な依存・分岐** を先に提示します。各作業には論理的な確認事項を付け、必要な箇所だけL1/L2の詳細へ降りられる構成にします。
+
+- [日本語版](simple-plan-auditor/)
+- [English version](simple-plan-auditor-en/)
 
 ## 使い方
 
