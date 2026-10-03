@@ -1,6 +1,6 @@
 ---
 name: scraping-procedure-deck
-description: Webサイトのスクレイピング（クロール）手順を、顧客向けのPowerPoint資料（.pptx）にまとめるスキル。画面キャプチャの上にPowerPointで編集できる赤枠と①②…の番号を重ね、画面遷移スライドでは操作の順番、データ取得スライドでは納品データレイアウトの項目No.に番号を対応させる。右側にデータレイアウト（項目名・型）を並べて画面との対応を示し、画面から取らない項目（クロール日時など）はグレーアウトする。商品ごとの表示の違い（レビューなし・セール表示など）も専用スライドか小さな切り抜きで示せる。既存の提案書などにそのデザインのまま差し込むこともできる。「スクレイピング手順書」「クロール手順をパワポで」「取得仕様の画面説明」「画面キャプチャに赤枠と番号」「データレイアウトと画面の対応」「Playwrightのコードから手順書」「scraping procedure slides」のような依頼で使う。入力は起点URL・URLの流れ・手持ちの画面キャプチャ・既存のPlaywrightコードのいずれでもよい。
+description: Webサイトのスクレイピング（クロール）手順を、顧客向けのPowerPoint資料（.pptx）にまとめるスキル。画面キャプチャの上にPowerPointで編集できる赤枠と①②…の番号を重ね、画面遷移スライドでは操作の順番、データ取得スライドでは納品データレイアウトの項目No.に番号を対応させる。右側にデータレイアウト（項目名・型）を並べて画面との対応を示し、画面から取らない項目（クロール日時など）はグレーアウトする。商品ごとの表示の違い（レビューなし・セール表示など）も専用スライドか小さな切り抜きで示せる。既存の提案書などにそのデザインのまま差し込むこともできる。「スクレイピング手順書」「クロール手順をパワポで」「取得仕様の画面説明」「画面キャプチャに赤枠と番号」「データレイアウトと画面の対応」「Playwrightのコードから手順書」「scraping procedure slides」のような依頼で使う。入力は起点URL・URLの流れ・手持ちの画面キャプチャ・既存のPlaywrightコード・PlaywrightのJSON実行レポートと添付PNGのいずれでもよい。
 ---
 
 # Scraping Procedure Deck
@@ -50,10 +50,12 @@ description: Webサイトのスクレイピング（クロール）手順を、�
 | B. URLの流れ | 画面ごとのURL（遷移順）、各画面での操作 | DOM座標から自動（正確） |
 | C. 手持ちの画面キャプチャ | 画像（遷移順）、各画像での操作 | 画像から読み取り（要微調整） |
 | D. 既存の Playwright コード | 操作を書いたスクリプト | DOM座標から自動（正確） |
+| E. Playwright の実行結果 | JSONレポートと添付PNG | 保存画像から読み取り（要微調整）。サイトの再操作なし |
 
 - どのパターンでもデータレイアウト（No.・項目名・型・画面から取らない項目）が必要
 - 迷ったら A にする。ログインや CAPTCHA で自動化できない画面だけ C を混ぜる
 - 表示の違いを入れるときは、その表示が出ているページのリンクと、どこが違うか（どう扱うか）をもらう
+- 実行結果を渡されたら E。[実行結果のインポート](references/import-results.md)に従い、成功した実行の添付PNGを一覧化して選ぶ。通常の文字ログ・HTMLレポート・`trace.zip` の直接変換には対応しない
 
 ## ワークフロー
 
@@ -77,6 +79,8 @@ W/preview/        目視確認用のPNG
 
 撮影範囲が未確定なら、ユーザーの回答を待つ。回答がないまま撮影を始めない。すでに具体的な対象・表示差分・再利用範囲が指定または合意されていれば、その範囲で進め、同じ確認を繰り返さない。合意内容は作業中の会話または作業メモで参照できるようにする。
 
+E は撮影済み画像の利用範囲と順序を合意する。レポートの受領は全添付・全リトライの採用指示ではない。画像が不足してもテストやログインを再実行せず、不足画面を伝える。
+
 合意後に別の表示差分を見つけても自動で追加しない。追加が必要なら、その画面・理由・追加撮影枚数を提示し、追加分だけ確認する。同じ対象の待ち時間・セレクタ調整や撮影失敗のやり直しは、範囲を変えずに実施できる。
 
 ### 2. シナリオを書く
@@ -89,6 +93,9 @@ W/preview/        目視確認用のPNG
 - **C**
   - `python S/scripts/overlay.py grid <画像>` で目盛り付き画像を作り、それを見て `box` の座標を読む
   - `python S/scripts/overlay.py boxes W/scenario.json` で枠を描いた確認画像を作り、ずれていれば直す
+- **E**
+  - `import_results.py --list` で画像候補を確認し、合意した添付IDと、画像から確認した赤枠・手順文・データレイアウトをインポート計画に書く。計画はスキル側で作成する
+  - [実行結果のインポート](references/import-results.md)のコマンドで画像と `scenario.json` を生成し、撮影を飛ばして手順4へ進む。テスト名だけから操作や取得項目を決めない
 - **D**
   - 合意した範囲に必要なコードの操作を、順番を保って shot と steps へ写す。対応は scenario-format.md の「Playwright コードからの変換」を参照
   - ロケータは `get_by_role` などをそのまま `target` のオブジェクト形式で書く（CSS に書き換えない）
@@ -117,6 +124,7 @@ python S/scripts/capture.py W/scenario.json --out W/captures --only item,item_sa
 ```
 python S/scripts/build_deck.py W/scenario.json --captures W/captures -o W/out/<名前>.pptx   # A/B/D
 python S/scripts/build_deck.py W/scenario.json -o W/out/<名前>.pptx                       # C
+python S/scripts/build_deck.py W/imported/scenario.json -o W/out/<名前>.pptx              # E
 ```
 
 既存の資料に差し込む場合は次のようにする。出力は別名にし、元の資料は上書きしない。
@@ -164,7 +172,7 @@ Windows は PowerPoint で、それ以外は LibreOffice で描画する。全�
 - ポップアップやバナーは `setup` の `hide` で隠す。Cookie同意などは「同意」を押さない
 - ヘッドレスブラウザ特有の UA で表示を変えるサイトがあるため、UA は通常の Chrome 表記に揃えている。例: au PAY マーケットはポイント表示が出なくなる
 - 後から読み込まれる値で位置がずれるため、座標は落ち着くまで測り直してから撮る（既定の動作）。それでも値が空なら `wait_ms` を伸ばす
-- ログイン・CAPTCHA・アクセス制限のある画面は自動化しない（突破を試みない）。その画面は C に切り替える
+- ログイン・CAPTCHA・アクセス制限のある画面は自動化しない（突破を試みない）。その画面は C、保存済みの実行結果があるなら E に切り替える
 - アクセスは資料作成に必要な最小限のページ数にとどめる
 
 ## QA チェックリスト（全スライド）
@@ -198,7 +206,9 @@ Windows は PowerPoint で、それ以外は LibreOffice で描画する。全�
 | `scripts/build_deck.py` | scenario（＋撮影結果）から pptx を生成する。既存資料への差し込み、切り出し・枠の間隔・番号の配置・スライド分割・はみ出し検出を行う |
 | `scripts/render_preview.py` | pptx を1枚ずつ PNG にする（PowerPoint または LibreOffice） |
 | `scripts/overlay.py` | C の座標読み取り用の目盛り画像と、枠の確認画像を作る |
+| `scripts/import_results.py` | E: Playwright JSONレポートの添付PNGを一覧化し、選択した画像と座標をscenarioへ取り込む |
 | `references/inputs.md` | 必要なもの（パターン別）とユーザーへの確認テンプレート |
+| `references/import-results.md` | 実行結果の用意・添付画像の選択・インポート計画とコマンド |
 | `references/scenario-format.md` | scenario.json の仕様、Playwright コードからの変換表 |
 | `examples/aupay-market.json` | au PAY マーケット（検索 → ショップ絞り込み → 商品詳細、表示の違い2種）の完成例 |
 

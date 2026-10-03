@@ -50,6 +50,10 @@ def with_libreoffice(pptx, out_dir, width):
 
 
 def main():
+    # Windowsのパイプ出力は既定でcp932になり、出力先パスやエラーの日本語が文字化けするため
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description="PPTXを1スライド1枚のPNGに書き出す（目視QA用）")
     ap.add_argument("pptx", type=Path)
     ap.add_argument("--out", type=Path, required=True)

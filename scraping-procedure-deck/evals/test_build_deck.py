@@ -2,6 +2,7 @@ import argparse
 import copy
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -10,6 +11,8 @@ from pathlib import Path
 
 from PIL import Image
 from pptx import Presentation
+from pptx.enum.dml import MSO_THEME_COLOR
+from pptx.oxml.ns import qn
 from pptx.util import Inches
 
 
@@ -108,6 +111,87 @@ class BuildDeckTests(unittest.TestCase):
                                  "--sections", "summary", "--out", str(out)], capture_output=True, check=False)
         self.assertEqual(result.returncode, 3, result.stderr)
         self.assertIn(b"NG:", result.stderr)
+
+    def two_screen_deck(self):
+        Image.new("RGB", (1280, 800), "white").save(self.base / "main.png")
+        return {
+            "title": "自前資料",
+            "data_layout": [{"no": 1, "name": "商品名", "type": "文字列"},
+                            {"no": 2, "name": "取得日時", "type": "日時", "on_screen": False}],
+            "shots": [
+                {"id": "list", "screen": "一覧", "title": "一覧から商品を開く", "image": "main.png",
+                 "steps": [{"kind": "op", "text": "商品名をクリック", "box": [80, 80, 240, 40]}]},
+                {"id": "item", "screen": "商品詳細", "title": "商品名を取得", "image": "main.png",
+                 "steps": [{"kind": "data", "item": 1, "box": [80, 200, 240, 40]}]},
+            ],
+        }
+
+    def insert(self, deck, base, insert_at=None):
+        args = argparse.Namespace(base=base, only="item", insert_at=insert_at, sections=None, max_per_slide=5)
+        builder = build_deck.Builder(deck, self.base, args)
+        out = self.base / "inserted.pptx"
+        builder.build(out)
+        self.assertEqual(builder.overflows, [])
+        return Presentation(out)
+
+    def test_insert_into_deck_built_by_this_script_keeps_its_title_and_footer(self):
+        deck = self.two_screen_deck()
+        own, _ = self.build(deck, sections=None)
+        prs = self.insert(deck, self.base / "test.pptx", insert_at=4)
+        self.assertEqual(len(prs.slides), len(own.prs.slides) + 1)
+        neighbor, added = prs.slides[2], prs.slides[3]
+        self.assertEqual(added.shapes.title.text, "商品名を取得")
+        self.assertTrue({"フッター", "スライド番号"} <= {shape.name for shape in added.shapes})
+        for slide in (neighbor, added):
+            title = slide.shapes.title
+            font = title.text_frame.paragraphs[0].runs[0].font
+            with self.subTest(slide=title.text):
+                self.assertEqual((title.left, title.top, title.width, title.height),
+                                 tuple(Inches(v) for v in build_deck.Geometry(13.333, 7.5).title))
+                self.assertEqual((font.name, font.size, font.bold), ("Meiryo UI", build_deck.Pt(24), True))
+
+    def test_hit_and_grayed_rows_follow_colors_of_inserted_deck(self):
+        for theme in ("light", "dark"):
+            with self.subTest(theme=theme):
+                base = Presentation()
+                if theme == "dark":
+                    clr_map = base.slide_masters[0]._element.find(qn("p:clrMap"))
+                    clr_map.set("bg1", "dk1")
+                    clr_map.set("tx1", "lt1")
+                base.slides.add_slide(base.slide_layouts[5]).shapes.title.text = "既存スライド"
+                base.save(self.base / f"{theme}.pptx")
+                prs = self.insert(self.two_screen_deck(), self.base / f"{theme}.pptx")
+                table = next(shape for slide in prs.slides for shape in slide.shapes if shape.name == "データレイアウト")
+                hit = next(row for row in list(table.table.rows)[1:] if row.cells[1].text == "商品名")
+                fill = hit.cells[1].fill.fore_color.rgb
+                if theme == "light":
+                    self.assertEqual(fill, build_deck.HIT_BG)
+                else:
+                    self.assertLess(sum(fill), 3 * 0x80)
+                    self.assertGreater(fill[0], max(fill[1], fill[2]))
+                runs = [run for cell in list(hit.cells)[1:] for p in cell.text_frame.paragraphs for run in p.runs]
+                self.assertTrue(runs)
+                for run in runs:
+                    self.assertEqual(run.font.color.theme_color, MSO_THEME_COLOR.TEXT_1)
+                grayed = next(row for row in list(table.table.rows)[1:] if row.cells[1].text == "取得日時")
+                gray_fill = grayed.cells[1].fill.fore_color.rgb
+                gray_text = grayed.cells[1].text_frame.paragraphs[0].runs[0].font.color.rgb
+                if theme == "light":
+                    self.assertEqual((gray_fill, gray_text), (build_deck.GRAY_BG, build_deck.GRAY_TX))
+                else:
+                    self.assertLess(sum(gray_fill), 3 * 0x80)
+                    self.assertGreater(sum(gray_text), sum(gray_fill))
+
+    def test_cli_messages_are_utf8_without_utf8_mode(self):
+        deck = self.two_screen_deck()
+        deck["data_layout"].append({"no": 3, "name": "価格", "type": "数値"})
+        scenario = self.base / "warn.json"
+        scenario.write_text(json.dumps(deck, ensure_ascii=False), encoding="utf-8")
+        env = {key: value for key, value in os.environ.items() if key not in ("PYTHONIOENCODING", "PYTHONUTF8")}
+        result = subprocess.run([sys.executable, str(Path(build_deck.__file__)), str(scenario),
+                                 "-o", str(self.base / "warn.pptx")], capture_output=True, env=env, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("WARN: データレイアウト No.3「価格」", result.stderr.decode("utf-8"))
 
 
 class MergeCapturesTests(unittest.TestCase):

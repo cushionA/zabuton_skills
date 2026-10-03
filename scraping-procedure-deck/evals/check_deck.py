@@ -29,8 +29,6 @@ TECH = [
 ]
 URL = re.compile(r"https?://[^\s）)」]+")
 MARKER = re.compile(r"^[\s①-⑳㉑-㉟㊱-㊿※0-9()]+$")
-# 画面から取らない項目のグレーアウトは意図した低コントラストなので対象外にする
-BY_DESIGN = {("#7F7F7F", "#D9D9D9")}
 
 
 def shapes_of(container):
@@ -280,6 +278,13 @@ def hexs(rgb):
     return "#" + "".join(f"{round(c * 255):02X}" for c in rgb)
 
 
+def grayed_out(col):
+    # 画面から取らない項目のグレーアウトは意図した低コントラストなので対象外にする。
+    # build_deck.py は背景色(bg1)と文字色(tx1)を混ぜてグレーを作るので、同じ式で（文字, 背景）を求める
+    bg, tx = col.scheme("bg1"), col.scheme("tx1")
+    return tuple(hexs(tuple(b + (t - b) * r for b, t in zip(bg, tx))) for r in (0x80 / 0xFF, 0x26 / 0xFF))
+
+
 def cmd_contrast(args):
     prs = Presentation(args.pptx)
     first, last = (int(v) for v in (args.slides or f"1-{len(prs.slides)}").split("-"))
@@ -289,6 +294,7 @@ def cmd_contrast(args):
             continue
         col = Colors(s)
         default_text = col.scheme("tx1")
+        by_design = grayed_out(col)
         filled = []
         for shp in shapes_of(s.shapes):
             if shp.shape_type == MSO_SHAPE_TYPE.PICTURE:
@@ -318,7 +324,7 @@ def cmd_contrast(args):
                         large = size >= 18 or (size >= 14 and r.font.bold) or MARKER.match(r.text)
                         need = 3.0 if large else 4.5
                         cr = ratio(fg, bg)
-                        if cr < need and (hexs(fg), hexs(bg)) not in BY_DESIGN:
+                        if cr < need and (hexs(fg), hexs(bg)) != by_design:
                             low += 1
                             print(f"NG  {i}枚目 {shp.name}: 「{r.text[:20]}」 文字{hexs(fg)} / 背景{hexs(bg)}  コントラスト比 {cr:.2f}（基準 {need}）")
     print("OK  文字と背景のコントラスト比はすべて基準以上" if not low else f"計 {low} 件")

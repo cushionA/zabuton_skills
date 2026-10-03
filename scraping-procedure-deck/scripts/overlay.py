@@ -1,5 +1,6 @@
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -68,6 +69,10 @@ def boxes(deck_path, out_dir):
 
 
 def main():
+    # Windowsのパイプ出力は既定でcp932になり、日本語のファイル名が文字化けするため
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description="赤枠座標の確認用画像を作る（PPTXには使わない）")
     sub = ap.add_subparsers(dest="cmd", required=True)
     g = sub.add_parser("grid", help="座標を読み取るための目盛り付き画像を作る（手持ち画像の枠座標を決めるとき）")

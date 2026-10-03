@@ -367,6 +367,10 @@ def run(scenario, out_dir, headed, only):
 
 
 def main():
+    # Windowsのパイプ出力は既定でcp932になり、進捗やエラーの日本語が文字化けするため
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description="シナリオJSONに従ってブラウザを操作し、画面キャプチャと赤枠座標(deck.json)を出力する")
     ap.add_argument("scenario", type=Path)
     ap.add_argument("--out", type=Path, required=True, help="キャプチャとdeck.jsonの出力先ディレクトリ")

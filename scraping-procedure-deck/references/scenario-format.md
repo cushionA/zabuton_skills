@@ -2,6 +2,8 @@
 
 1つの JSON に「資料の情報」「データレイアウト」「画面ごとの手順」を書く。A/B/D では `capture.py` がこれを実行して撮影する。C では画像と座標を直接書く。完成例は [examples/aupay-market.json](../examples/aupay-market.json)。
 
+E（Playwright実行結果）は[インポート計画](import-results.md)から C と同じ画像・座標形式を生成する。生成後は `capture.py` を実行せず、その `scenario.json` を直接ビルドする。
+
 スライドに出るのは次の文言だけ。`target` などの技術情報は資料に出ない。
 
 - `title` `subtitle` `screen` `text` `detail` `notes` `variant` `diff`

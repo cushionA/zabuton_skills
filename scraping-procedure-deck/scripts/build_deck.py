@@ -537,6 +537,23 @@ def theme_font(master, kind="minor"):
     return DEFAULT_FONT
 
 
+def scheme_rgb(master, key):
+    a = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    name = master._element.find(qn("p:clrMap")).get(key, key)
+    color = etree.fromstring(master.part.part_related_by(RT.THEME).blob).find(f".//{a}clrScheme/{a}{name}")[0]
+    return RGBColor.from_string(color.get("lastClr") or color.get("val"))
+
+
+def mix(base, color, ratio):
+    return RGBColor(*(round(b + (c - b) * ratio) for b, c in zip(base, color)))
+
+
+def hit_fill(background):
+    # 取得行の薄赤は、差し込み先の背景色に赤を混ぜて作る（白背景なら HIT_BG と同じ色）。
+    # 文字はテーマの文字色のままなので、ダークテーマでも読める。暗い背景では同じ割合だと見分けにくいので赤を強める
+    return mix(background, RED, 0x11 / 0xFF if sum(background) > 3 * 0x80 else 0.25)
+
+
 def title_size(master):
     a = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
     style = master._element.find(qn("p:txStyles") + "/" + qn("p:titleStyle"))
@@ -588,14 +605,25 @@ class Builder:
         self.warnings, self.overflows = [], []
         self.images = {}
         self.only = set(args.only.split(",")) if args.only else None
-        self.template = args.base is not None
-        if self.template:
-            self.prs = Presentation(args.base)
+        self.inserting = args.base is not None
+        self.prs = Presentation(args.base) if self.inserting else Presentation()
+        # このスクリプトで作った資料（図形名「フッター」のテキストボックスがある）へ足すときは、
+        # テーマに合わせると前後のスライドと書式がずれるため、元と同じ自前の書式で作る
+        self.template = self.inserting and not any(
+            shape.name == "フッター" for slide in self.prs.slides for shape in slide.shapes)
+        if self.inserting:
             self.n_existing = len(self.prs.slides)
             self.insert_at = min(max(1, args.insert_at or self.n_existing + 1), self.n_existing + 1)
             ref = self.prs.slides[self.insert_at - 2] if self.insert_at > 1 else (
                 self.prs.slides[0] if self.n_existing else None)
             self.content_layout = pick_layout(self.prs, ref)
+            default_sections = "overview,steps,summary"
+        else:
+            self.prs.slide_width, self.prs.slide_height = Inches(13.333), Inches(7.5)
+            self.n_existing, self.insert_at = 0, 1
+            self.content_layout = self.prs.slide_layouts[5]
+            default_sections = "cover,overview,steps,summary"
+        if self.template:
             master = self.content_layout.slide_master
             tp = next(ph for ph in self.content_layout.placeholders
                       if ph.placeholder_format.type == PP_PLACEHOLDER.TITLE)
@@ -610,16 +638,15 @@ class Builder:
             M = Metrics(theme_font(master))
             self.title_metrics = Metrics(theme_font(master, "major"))
             self.title_pt = title_size(master)
-            default_sections = "overview,steps,summary"
+            bg, tx = scheme_rgb(master, "bg1"), scheme_rgb(master, "tx1")
+            self.hit_bg = hit_fill(bg)
+            # グレーアウトも差し込み先の背景色と文字色を混ぜて作る（白地に黒文字なら GRAY_BG / GRAY_TX と同じ色）
+            self.gray_bg, self.gray_tx = mix(bg, tx, 0x26 / 0xFF), mix(bg, tx, 0x80 / 0xFF)
         else:
-            self.prs = Presentation()
-            self.prs.slide_width, self.prs.slide_height = Inches(13.333), Inches(7.5)
-            self.n_existing, self.insert_at = 0, 1
-            self.content_layout = self.prs.slide_layouts[5]
             self.geo = Geometry(13.333, 7.5)
             FONT_NAME = DEFAULT_FONT
             M = Metrics(DEFAULT_FONT)
-            default_sections = "cover,overview,steps,summary"
+            self.hit_bg, self.gray_bg, self.gray_tx = HIT_BG, GRAY_BG, GRAY_TX
         if self.only:
             default_sections = "steps"
         self.sections = set((args.sections or default_sections).split(","))
@@ -746,7 +773,7 @@ class Builder:
         for no, item in self.layout.items():
             if item.get("on_screen", True) and no not in where:
                 self.warnings.append(f"データレイアウト No.{no}「{item['name']}」がどの画面にも対応付けられていません")
-        if "cover" in self.sections and self.template:
+        if "cover" in self.sections and self.inserting:
             self.warnings.append("差し込みモードでは表紙を作りません（差し込み先の表紙を使ってください）")
         elif "cover" in self.sections:
             self.title_slide()
@@ -757,7 +784,7 @@ class Builder:
                 self.content_slide(sl, i)
         if "summary" in self.sections:
             self.summary_slides(where)
-        if self.template:
+        if self.inserting:
             self.move_new_slides()
         self.prs.save(out_path)
 
@@ -1004,7 +1031,7 @@ class Builder:
                 add_box(slide.shapes, MSO_SHAPE.RECTANGLE, x + 0.34, yy + 0.04, 0.46, 0.3, line=RED, line_w=2.25)
                 add_label(slide.shapes, (x, yy + 0.04, LABEL, LABEL), num, 16, None)
             else:
-                add_box(slide.shapes, MSO_SHAPE.RECTANGLE, x + 0.04, yy + 0.04, 0.76, 0.3, fill=GRAY_BG)
+                add_box(slide.shapes, MSO_SHAPE.RECTANGLE, x + 0.04, yy + 0.04, 0.76, 0.3, fill=self.gray_bg)
             add_text(slide.shapes, x + 0.95, yy, col_w - 1.05, h - 0.6,
                      [{"runs": [(head, 12, C["ink"], True)], "space_after": 2},
                       {"runs": [(desc, 11, C["muted"], False)]}])
@@ -1274,16 +1301,16 @@ class Builder:
         for it in items:
             no = it["no"]
             if not it.get("on_screen", True):
-                fill, color, num_color, bold, sub = GRAY_BG, GRAY_TX, GRAY_TX, False, None
+                fill, color, num_color, bold, sub = self.gray_bg, self.gray_tx, self.gray_tx, False, None
             elif no in hits:
-                fill, color, num_color, bold, sub = HIT_BG, C["ink"], RED, True, hits[no].get("detail")
+                fill, color, num_color, bold, sub = self.hit_bg, C["ink"], RED, True, hits[no].get("detail")
             else:
                 other = [s for s in where.get(no, {}) if s != shot["screen"]]
                 fill, color, num_color, bold = C["white"], C["muted"], C["muted"], False
                 sub = f"{other[0]}で取得" if other else None
             name = [[(it["name"], size, color, bold)]]
             if sub:
-                name.append([(sub, size - 2, GRAY_TX if color is GRAY_TX else C["muted"], False)])
+                name.append([(sub, size - 2, self.gray_tx if color is self.gray_tx else C["muted"], False)])
             cells = [([[(circled(no), size + 1, num_color, True)]], PP_ALIGN.CENTER),
                      (name, PP_ALIGN.LEFT),
                      ([[(it.get("type", ""), size, color, False)]], PP_ALIGN.LEFT)]
@@ -1306,7 +1333,7 @@ class Builder:
         gray = False
         for it in items:
             off = not it.get("on_screen", True)
-            color = GRAY_TX if off else C["ink"]
+            color = self.gray_tx if off else C["ink"]
             if off:
                 src = [[(it.get("origin") or "画面外", size, color, False)]]
             elif where.get(it["no"]):
@@ -1318,7 +1345,7 @@ class Builder:
                 src = [runs]
             else:
                 src = [[("（未対応付け）", size, color, False)]]
-            cells = [([[(circled(it["no"]), size + 1, GRAY_TX if off else RED, True)]], PP_ALIGN.CENTER),
+            cells = [([[(circled(it["no"]), size + 1, self.gray_tx if off else RED, True)]], PP_ALIGN.CENTER),
                      ([[(it["name"], size, color, False)]], PP_ALIGN.LEFT),
                      ([[(it.get("type", ""), size, color, False)]], PP_ALIGN.LEFT),
                      (src, PP_ALIGN.LEFT),
@@ -1331,7 +1358,7 @@ class Builder:
                 pages.append(cur)
                 cur, used = [], 0.42
                 gray = False
-            cur.append((cells, GRAY_BG if off else C["white"], h, off))
+            cur.append((cells, self.gray_bg if off else C["white"], h, off))
             used += h
             gray = gray or off
         pages.append(cur)
@@ -1392,6 +1419,10 @@ def merge_captures(deck, deck_dir, captures_dir):
 
 
 def main():
+    # Windowsのパイプ出力は既定でcp932になり、WARNやエラーの日本語が文字化けするため
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description="シナリオ（＋撮影結果）から、赤枠と番号を編集できるPPTX手順書を生成する")
     ap.add_argument("deck", type=Path, help="scenario.json（--captures と併用）または capture.py が出力した deck.json")
     ap.add_argument("-o", "--out", type=Path)
