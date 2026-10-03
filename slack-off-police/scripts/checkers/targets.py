@@ -13,6 +13,8 @@ import psutil
 import win32gui
 import win32process
 
+from checkers.vscode_activity import EDITOR_PROCESSES
+
 # killするとOSが不安定になる/デスクトップが死ぬプロセス。targetsに何を書かれても除外する。
 PROTECTED_PROCESSES = {
     "system", "system idle process", "registry", "memory compression",
@@ -22,6 +24,9 @@ PROTECTED_PROCESSES = {
     "shellexperiencehost.exe", "searchhost.exe", "startmenuexperiencehost.exe",
     "textinputhost.exe", "applicationframehost.exe",
 }
+# 作業中のエディタも落とさない。ファイル名やフォルダ名にキーワードが入るとタイトルで一致してしまう
+# （例: "YouTube" が "youtube_scraper.py - Visual Studio Code" に一致し、未保存の作業ごと落ちる）
+PROTECTED_PROCESSES |= EDITOR_PROCESSES
 
 
 def _protected_pids():

@@ -241,7 +241,7 @@ Copy-Item -Recurse -Force "<skill-path>\vscode-extension" $dest
 - キーワードは英数字に挟まれた位置ではマッチしない実装にしてある
   （`X` が `explorer.exe` にヒットしてデスクトップごと落ちる事故を防ぐため）。
   それでも `X` のような短いキーワードは誤爆しやすいので、ユーザーに一言確認すること
-- explorer.exe や svchost.exe などのシステムプロセス、および監視スクリプト自身とその親プロセス
+- explorer.exe や svchost.exe などのシステムプロセス、VS Code・Cursor などのエディタ、および監視スクリプト自身とその親プロセス
   （Claude Code / Codex / ターミナル）は、targetsに何を書かれてもkillしない
 - **AIエージェントやVS Codeに投げた質問文は、既定ではLLMに渡る**。嫌がられたら `--no-chat-text`
   （件数だけ渡す）を使う。読むのは監視対象ディレクトリで投げた質問だけ

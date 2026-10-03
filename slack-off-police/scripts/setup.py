@@ -15,6 +15,10 @@ from config_schema import save_config
 
 
 def main():
+    # Windowsのパイプ出力は既定でcp932になり、設定内容の日本語が文字化けするため
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="サボり警察の初回設定を保存する")
     parser.add_argument("--dir", required=True, help="監視対象ディレクトリのフルパス")
     parser.add_argument(

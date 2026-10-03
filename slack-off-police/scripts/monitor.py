@@ -79,6 +79,11 @@ def collect_activity(config, dir_path, since_ts):
 
 def main():
     global _log_file
+    # Windowsのパイプ出力は既定でcp932になり、日本語が文字化けし、cp932外の文字では例外で落ちるため。
+    # pythonw では標準出力が None なので何もしない
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="サボり警察 監視ループ")
     parser.add_argument("--dir", required=True, help="監視対象ディレクトリのフルパス")
     parser.add_argument("--audio", default=None, help="サボり検知時に鳴らす音声ファイルのパス（任意）")
