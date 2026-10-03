@@ -1,0 +1,103 @@
+{
+  "title": "ZBマート 商品情報取得手順",
+  "subtitle": "キーワード検索 → ショップ絞り込み → 商品詳細ページで商品情報を取得",
+  "site": "ZBマート（検証用モック）",
+  "start_url": "http://localhost:8765/index.html",
+  "date": "2026/10/03",
+  "browser": {"viewport": [1280, 800], "device_scale_factor": 2},
+  "data_layout": [
+    {"no": 1, "name": "取得日時", "type": "日時", "on_screen": false, "origin": "クロール実行時に付与"},
+    {"no": 2, "name": "商品URL", "type": "文字列", "on_screen": false, "origin": "アクセスしたURLを記録"},
+    {"no": 3, "name": "商品名", "type": "文字列"},
+    {"no": 4, "name": "販売価格", "type": "数値", "note": "税込。セール時はセール後の販売価格"},
+    {"no": 5, "name": "ポイント", "type": "数値", "note": "獲得ポイント数。売り切れ時は空"},
+    {"no": 6, "name": "レビュー件数", "type": "数値", "note": "レビューがない場合は0"},
+    {"no": 7, "name": "評価", "type": "数値", "note": "5点満点（小数第1位）。レビューがない場合は空"},
+    {"no": 8, "name": "メーカー", "type": "文字列"},
+    {"no": 9, "name": "型番", "type": "文字列"},
+    {"no": 10, "name": "JANコード", "type": "文字列", "note": "13桁"},
+    {"no": 11, "name": "在庫状況", "type": "文字列", "note": "在庫あり／売り切れ"},
+    {"no": 12, "name": "商品説明", "type": "文字列"}
+  ],
+  "shots": [
+    {
+      "id": "top",
+      "screen": "トップページ",
+      "title": "キーワードで商品を検索",
+      "goto": "http://localhost:8765/index.html",
+      "setup": [
+        {"action": "hide", "target": "[class*='Modal_overlay']"},
+        {"action": "hide", "target": "[class*='CookieBanner_banner']"}
+      ],
+      "steps": [
+        {"kind": "op", "text": "検索窓にキーワード「ワイヤレスイヤホン」を入力",
+         "target": {"placeholder": "キーワードを入力して検索"}, "action": {"fill": "ワイヤレスイヤホン"}},
+        {"kind": "op", "text": "「検索」ボタンをクリック",
+         "target": {"role": "button", "name": "検索", "exact": true}, "action": "click"}
+      ]
+    },
+    {
+      "id": "search",
+      "screen": "検索結果ページ",
+      "title": "ショップで絞り込み",
+      "setup": [{"action": "hide", "target": "[class*='CookieBanner_banner']"}],
+      "steps": [
+        {"kind": "op", "text": "左メニュー「ショップで絞り込み」で「ZBデンキ」をクリック",
+         "target": {"role": "link", "name": "ZBデンキ", "exact": true, "within": {"css": "aside section", "has_text": "ショップで絞り込み"}},
+         "action": "click"}
+      ]
+    },
+    {
+      "id": "filtered",
+      "screen": "検索結果ページ（絞り込み後）",
+      "title": "絞り込みを確認して商品を開く",
+      "setup": [{"action": "hide", "target": "[class*='CookieBanner_banner']"}],
+      "steps": [
+        {"kind": "op", "text": "絞り込み条件に「ショップ：ZBデンキ」が表示されていることを確認",
+         "target": "[class*='ConditionChip_active']"},
+        {"kind": "op", "text": "商品名をクリックして商品詳細ページを開く", "detail": "商品詳細ページは新しいタブで開きます",
+         "target": {"css": "[class*='ItemCard_title']", "nth": 0}, "action": "click"}
+      ],
+      "notes": [
+        "一覧に表示される各商品について、⑤以降の手順を繰り返します",
+        "次のページがある場合は「次へ」で進み、同じ手順を繰り返します"
+      ]
+    },
+    {
+      "id": "item",
+      "screen": "商品詳細ページ",
+      "title": "商品情報を取得",
+      "wait_ms": 2500,
+      "setup": [{"action": "hide", "target": "[class*='CookieBanner_banner']"}],
+      "steps": [
+        {"kind": "data", "item": 3, "target": "h1[class*='ItemTitle_itemTitle']"},
+        {"kind": "data", "item": 4, "target": "strong[class*='Price_current']"},
+        {"kind": "data", "item": 5, "target": "[class*='Point_point']"},
+        {"kind": "data", "item": 6, "target": "a[class*='Review_count']"},
+        {"kind": "data", "item": 7, "target": "[class*='Review_score']"},
+        {"kind": "data", "item": 11, "target": "[class*='Stock_row']"},
+        {"kind": "data", "item": 8, "target": "[class*='SpecTable_table'] tr:has(th:text-is('メーカー'))"},
+        {"kind": "data", "item": 9, "target": "[class*='SpecTable_table'] tr:has(th:text-is('型番'))"},
+        {"kind": "data", "item": 10, "target": "[class*='SpecTable_table'] tr:has(th:text-is('JANコード'))"},
+        {"kind": "data", "item": 12, "target": "[class*='Description_body']"}
+      ],
+      "peeks": [
+        {
+          "item": 6,
+          "text": "レビューがない商品は評価欄が表示されないため、レビュー件数を0、評価を空とします",
+          "example": "レビューがない商品の例",
+          "goto": "http://localhost:8765/item.html?id=1002",
+          "target": ["h1[class*='ItemTitle_itemTitle']", "[class*='Price_price']"]
+        },
+        {
+          "item": 11,
+          "text": "売り切れの商品は「売り切れ」と表示され、ポイントは表示されません。在庫状況は「売り切れ」、ポイントは空とします",
+          "example": "売り切れの商品の例",
+          "goto": "http://localhost:8765/item.html?id=1004",
+          "target": ["[class*='Price_price']", "[class*='Stock_row']"],
+          "mark": "[class*='SoldOut_badge']"
+        }
+      ]
+    }
+  ]
+}

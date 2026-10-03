@@ -1,0 +1,176 @@
+{
+  "title": "au PAY マーケット 商品情報取得手順",
+  "subtitle": "キーワード検索 → ショップ絞り込み → 商品詳細ページで商品名・価格・ポイントを取得",
+  "site": "au PAY マーケット",
+  "start_url": "https://wowma.jp/",
+  "browser": {
+    "viewport": [
+      1280,
+      800
+    ],
+    "device_scale_factor": 2
+  },
+  "data_layout": [
+    {
+      "no": 1,
+      "name": "クロール日時",
+      "type": "日時",
+      "on_screen": false,
+      "origin": "クロール実行時に付与"
+    },
+    {
+      "no": 2,
+      "name": "商品URL",
+      "type": "文字列",
+      "on_screen": false,
+      "origin": "アクセスしたURLを記録"
+    },
+    {
+      "no": 3,
+      "name": "商品名",
+      "type": "文字列"
+    },
+    {
+      "no": 4,
+      "name": "価格",
+      "type": "数値",
+      "note": "税込価格"
+    },
+    {
+      "no": 5,
+      "name": "ポイント",
+      "type": "数値",
+      "note": "付与予定ポイント数"
+    },
+    {
+      "no": 6,
+      "name": "レビュー件数",
+      "type": "数値",
+      "note": "レビューがない場合は0"
+    }
+  ],
+  "shots": [
+    {
+      "id": "top",
+      "screen": "トップページ",
+      "title": "キーワードで商品を検索",
+      "goto": "https://wowma.jp/",
+      "steps": [
+        {
+          "kind": "op",
+          "text": "検索窓にキーワード「ワイヤレスイヤホン」を入力",
+          "target": "form[action='/itemlist'] input[name='keyword']",
+          "action": {
+            "fill": "ワイヤレスイヤホン"
+          }
+        },
+        {
+          "kind": "op",
+          "text": "「検索」ボタンをクリック",
+          "target": "form[action='/itemlist'] button[type='submit']",
+          "action": "click"
+        }
+      ]
+    },
+    {
+      "id": "search",
+      "screen": "検索結果ページ",
+      "title": "ショップで絞り込み",
+      "steps": [
+        {
+          "kind": "op",
+          "text": "左メニュー「ショップから探す」で「コジマ au PAY マーケット店」をクリック",
+          "detail": "対象ショップが一覧にない場合は「もっと見る」を押して一覧を展開",
+          "target": "section:has(h4:text-is('ショップから探す')) a:text-is('コジマ au PAY マーケット店')",
+          "action": "click"
+        }
+      ]
+    },
+    {
+      "id": "filtered",
+      "screen": "検索結果ページ（絞り込み後）",
+      "title": "絞り込みを確認して商品を開く",
+      "steps": [
+        {
+          "kind": "op",
+          "text": "絞り込み条件に「コジマ au PAY マーケット店」が表示されていることを確認",
+          "target": "a[class*='ConditionButton_conditionButton__content_active']"
+        },
+        {
+          "kind": "op",
+          "text": "商品名をクリックして商品詳細ページを開く",
+          "target": "h6[class*='WideListCard_itemCard__itemName_title']",
+          "action": "click"
+        }
+      ],
+      "notes": [
+        "一覧に表示される各商品について、⑤以降の手順を繰り返します"
+      ]
+    },
+    {
+      "id": "item",
+      "screen": "商品詳細ページ",
+      "title": "商品名・価格・ポイント・レビュー件数を取得",
+      "wait_ms": 3000,
+      "steps": [
+        {
+          "kind": "data",
+          "item": 3,
+          "target": "h1[class*='ItemTitle_itemTitle']"
+        },
+        {
+          "kind": "data",
+          "item": 4,
+          "target": "strong[class*='Price_price__currentPrice']"
+        },
+        {
+          "kind": "data",
+          "item": 5,
+          "target": "div[class*='Point_point__']"
+        },
+        {
+          "kind": "data",
+          "item": 6,
+          "target": "span[class*='Review_review__count']"
+        }
+      ],
+      "peeks": [
+        {
+          "item": 6,
+          "text": "レビューがない商品は評価欄が表示されないため、レビュー件数を0とします",
+          "example": "レビューがない商品の例",
+          "goto": "https://wowma.jp/item/780424332",
+          "target": [
+            "h1[class*='ItemTitle_itemTitle']",
+            "div[class*='Point_point__']"
+          ],
+          "mark": "[class*='ItemDetails_reviewShareGrid']"
+        }
+      ]
+    },
+    {
+      "id": "item_sale",
+      "screen": "商品詳細ページ",
+      "variant": "メーカー希望小売価格が表示される商品",
+      "data_title": "価格の取得位置",
+      "goto": "https://wowma.jp/item/412429708",
+      "wait_ms": 3000,
+      "diff": [
+        "価格の上にメーカー希望小売価格が併記される",
+        "価格は販売価格（税込）を取得し、メーカー希望小売価格は取得しない"
+      ],
+      "steps": [
+        {
+          "kind": "data",
+          "item": 4,
+          "target": "strong[class*='Price_price__currentPrice']"
+        },
+        {
+          "kind": "mark",
+          "text": "メーカー希望小売価格は取得しない",
+          "target": "span[class*='SuggestedRetailPrice_suggestedRetailPrice']"
+        }
+      ]
+    }
+  ]
+}
