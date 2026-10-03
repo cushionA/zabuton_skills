@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+  <title>$title</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; color: light-dark(#253128, #e2e9e4); background: light-dark(#f5f7f5, #191d1a); }
+    * { box-sizing: border-box; }
+    body { margin: 0; line-height: 1.65; overflow-wrap: anywhere; }
+    main { max-width: 960px; margin: 0 auto; padding: 28px 20px 48px; }
+    h1 { font-size: 24px; font-weight: 600; margin: 0 0 10px; }
+    nav { margin: 22px 0; }
+    nav ul { padding-left: 22px; }
+    a { color: light-dark(#24573b, #a7d5b9); }
+    details { margin: 12px 0; border: 1px solid light-dark(#d6dfd8, #48554c); border-radius: 8px; background: light-dark(#fff, #222923); }
+    summary { padding: 12px 14px; cursor: pointer; font-weight: 600; }
+    .section-content { padding: 0 14px 12px; min-width: 0; }
+    p { margin: 10px 0; }
+    ul { padding-left: 24px; }
+    li { margin: 5px 0; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; background: light-dark(#eef2ef, #18201a); padding: 12px; border-radius: 6px; }
+    code { font-size: 0.95em; }
+    .table-scroll { max-width: 100%; overflow-x: auto; margin: 12px 0; }
+    table { width: 100%; border-collapse: collapse; min-width: 420px; }
+    th, td { text-align: left; vertical-align: top; border-bottom: 1px solid light-dark(#d6dfd8, #48554c); padding: 9px 10px; }
+    th { background: light-dark(#eef2ef, #18201a); }
+    .notice { color: light-dark(#58665d, #b5c2b9); font-size: 14px; }
+    @media (max-width: 480px) { main { padding: 20px 12px 32px; } h1 { font-size: 21px; } .section-content { padding: 0 9px 9px; } summary { padding: 12px 10px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>$title</h1>
+    <p class="notice">元のMarkdownを表示しています。監査や承認の判定は行いません。</p>
+    <nav aria-label="目次"><strong>目次</strong><ul>$toc</ul></nav>
+    <article aria-label="計画本文">$content</article>
+  </main>
+  <script>
+    (() => {
+      const reveal = id => {
+        let targetId;
+        try { targetId = decodeURIComponent(id); } catch { return; }
+        const target = document.getElementById(targetId);
+        if (!target || target.tagName !== 'DETAILS') return;
+        let node = target;
+        while (node) {
+          if (node.tagName === 'DETAILS') node.open = true;
+          node = node.parentElement;
+        }
+        target.scrollIntoView();
+      };
+      document.querySelector('main').addEventListener('click', event => {
+        const link = event.target.closest('a');
+        if (link) reveal(link.hash.slice(1));
+      });
+      window.addEventListener('hashchange', () => reveal(location.hash.slice(1)));
+      if (location.hash) reveal(location.hash.slice(1));
+    })();
+  </script>
+</body>
+</html>

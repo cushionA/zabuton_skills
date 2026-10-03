@@ -101,7 +101,18 @@ def parse_table(map_body: str) -> tuple[list[list[str]], list[str]]:
         return [], ["全体作業マップにMarkdown表がありません。"]
 
     def cells(line: str) -> list[str]:
-        return [c.strip() for c in line.strip().strip("|").split("|")]
+        parts = [""]
+        escaped = False
+        for char in line.strip():
+            if char == "|" and not escaped:
+                parts.append("")
+            else:
+                parts[-1] += char
+            escaped = char == "\\" and not escaped
+        parts = parts[1:]
+        if not parts[-1]:
+            parts.pop()
+        return [part.strip() for part in parts]
 
     headers = [re.sub(r"\*", "", c).strip() for c in cells(lines[0])]
     if headers != EXPECTED_HEADERS:
@@ -125,27 +136,54 @@ def parse_table(map_body: str) -> tuple[list[list[str]], list[str]]:
     return rows, errors
 
 
+def link_labels(work: str) -> str:
+    result: list[str] = []
+    start = 0
+    for match in re.finditer(r"\[((?:\\.|[^\\])*?)\]\(", work):
+        if match.start() < start:
+            continue
+        depth = 1
+        escaped = False
+        for index in range(match.end(), len(work)):
+            char = work[index]
+            if not escaped:
+                if char == "(":
+                    depth += 1
+                elif char == ")":
+                    depth -= 1
+            escaped = char == "\\" and not escaped
+            if depth == 0:
+                result.extend((work[start:match.start()], match.group(1)))
+                start = index + 1
+                break
+    result.append(work[start:])
+    return "".join(result)
+
+
 def packing_reason(work: str) -> str | None:
     """1セルへ複数作業を詰め込んでいる疑いを粗く判定する。
 
     誤検出を避けるため、単独のスラッシュ(A/Bテスト, CSV/TSV 等)は許容する。
     """
+    work = link_labels(work)
     if re.search(r"<br\s*/?>", work):
-        return "改行タグで複数作業を並べています"
+        return "改行タグで複数作業を並べている疑いがあります"
     if re.search(r"[;；]", work):
-        return "セミコロン区切りで複数作業を並べています"
+        return "セミコロン区切りで複数作業を並べている疑いがあります"
+    if work.count("、") >= 2:
+        return "読点区切りで3つ以上の作業を並べている疑いがあります"
     if len(re.findall(r"[/／]", work)) >= 2 or re.search(r"\s[/／]|[/／]\s", work):
-        return "スラッシュ区切りで複数作業を並べています"
+        return "スラッシュ区切りで複数作業を並べている疑いがあります"
     return None
 
 
-def validate(text: str) -> list[str]:
+def validate(text: str) -> tuple[list[str], list[str]]:
     errors: list[str] = []
-    ov_raw = overview_only(text)
-    if ov_raw is None:
-        return [f"{OVERVIEW_HEADING} がありません。"]
+    warnings: list[str] = []
+    ov = overview_only(mask_fences(text))
+    if ov is None:
+        return [f"{OVERVIEW_HEADING} がありません。"], warnings
 
-    ov = mask_fences(ov_raw)
     sections = split_sections(ov)
 
     # 階層チェック(番号・装飾は任意、名称と順序は必須)
@@ -182,13 +220,13 @@ def validate(text: str) -> list[str]:
 
             reason = packing_reason(work)
             if reason:
-                errors.append(
-                    f"作業マップ {idx} 行目: {reason}。1作業1行へ分割するか、L0の粒度を一段上位化してください: `{work}`"
+                warnings.append(
+                    f"作業マップ {idx} 行目: {reason}。確認対象が分かりにくければ、行の分割や作業粒度の変更を検討してください: `{work}`"
                 )
 
         if len(rows) > 30:
-            errors.append(
-                f"L0の作業行が {len(rows)} 行あります。詳細を1セルへ詰めず、L0へ載せる作業粒度を一段上げてください（目安30行以内）。"
+            warnings.append(
+                f"L0の作業行が {len(rows)} 行あります。全体を確認しづらければ、作業粒度の変更を検討してください（目安30行以内）。"
             )
 
     caution = by_name.get("要注意事項・人間判断")
@@ -199,26 +237,28 @@ def validate(text: str) -> list[str]:
     if dependency is not None and not dependency.strip():
         errors.append("重要な依存・分岐が空です。特記事項がなければ `なし` と明記してください。")
 
-    return errors
+    return errors, warnings
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate simple-plan-auditor L0 overview structure")
+    # Windowsのパイプ出力は既定でcp932になり、日本語が文字化けし、cp932外の文字では例外で落ちるため
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+    parser = argparse.ArgumentParser(description="Validate the standard simple-plan-auditor L0 structure; not plan correctness or readiness")
     parser.add_argument("plan", type=Path, help="Markdown plan file")
     args = parser.parse_args()
 
     text = args.plan.read_text(encoding="utf-8")
-    errors = validate(text)
+    errors, warnings = validate(text)
 
-    if errors:
-        print("OVERVIEW VALIDATION: FAIL")
-        for i, error in enumerate(errors, start=1):
-            print(f"{i}. {error}")
-        print("\nL0を修正し、再度バリデーションしてください。L1/L2の確定へ進まないでください。")
-        return 1
-
-    print("OVERVIEW VALIDATION: PASS")
-    return 0
+    print(f"OVERVIEW STRUCTURE: {'FAIL' if errors else 'PASS'}")
+    for i, error in enumerate(errors, start=1):
+        print(f"ERROR {i}. {error}")
+    for i, warning in enumerate(warnings, start=1):
+        print(f"WARNING {i}. {warning}")
+    print("構造検査のみ。計画の妥当性や着手可否は判定していません。")
+    return 1 if errors else 0
 
 
 if __name__ == "__main__":
