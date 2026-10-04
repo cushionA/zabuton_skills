@@ -1,0 +1,12 @@
+# 依存
+node_modules/
+
+# Playwright の生成物（動画・trace・スクリーンショット・レポート）はコミットしない
+test-results/
+test-results-*/
+playwright-report/
+playwright-report-*/
+results/
+results-*/
+*.webm
+*.zip
