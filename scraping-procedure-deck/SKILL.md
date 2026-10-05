@@ -127,7 +127,17 @@ python S/scripts/build_deck.py W/scenario.json -o W/out/<名前>.pptx           
 python S/scripts/build_deck.py W/imported/scenario.json -o W/out/<名前>.pptx              # E
 ```
 
-既存の資料に差し込む場合は次のようにする。出力は別名にし、元の資料は上書きしない。
+既存の資料に差し込む場合は、生成の前に差し込み先のデザインを目で確認する。スクリプトはマスターとテーマから合わせるため、スライドに直接付けた書式は拾えない。
+
+```
+python S/scripts/render_preview.py <既存.pptx> --out W/preview_base
+```
+
+- 差し込み位置の前後のスライドを開き、タイトルの位置・色・大きさ、本文の余白、ロゴや帯、フッターの内容を確認する
+- マスターやテーマに無い書式（スライドごとに変えたタイトル色、スライド上に置いたロゴ・帯など）や、章ごとに違うフッターがあれば、生成後に手で合わせる箇所としてユーザーに伝える
+- 手順5のQAでは、このプレビューと並べて比べる
+
+生成は次のようにする。出力は別名にし、元の資料は上書きしない。
 
 ```
 python S/scripts/build_deck.py W/scenario.json --captures W/captures --base <既存.pptx> --insert-at 3 -o W/out/<名前>.pptx
