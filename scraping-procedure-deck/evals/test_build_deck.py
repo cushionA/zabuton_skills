@@ -36,6 +36,29 @@ class BuildDeckTests(unittest.TestCase):
         self.assertEqual(builder.overflows, [])
         return builder, Presentation(out)
 
+    def test_build_creates_missing_output_parents(self):
+        args = argparse.Namespace(base=None, only=None, insert_at=None, sections="cover", max_per_slide=5)
+        builder = build_deck.Builder({"title": "保存先", "shots": [], "data_layout": []}, self.base, args)
+        out = self.base / "new" / "nested" / "deck.pptx"
+        builder.build(str(out))
+        self.assertEqual(len(Presentation(out).slides), 1)
+
+    def test_cover_links_site_name_without_showing_start_url(self):
+        url = "https://example.test/start?internal=value"
+        for link in (True, False):
+            with self.subTest(link=link):
+                _, prs = self.build({"title": "手順書", "site": "対象サイト名", "start_url": url,
+                                     "link": link, "shots": [], "data_layout": []}, "cover")
+                slide = prs.slides[0]
+                texts = "\n".join(shape.text for shape in slide.shapes if shape.has_text_frame)
+                self.assertIn("対象サイト名", texts)
+                self.assertNotIn(url, texts)
+                runs = [run for shape in slide.shapes if shape.has_text_frame
+                        for paragraph in shape.text_frame.paragraphs for run in paragraph.runs
+                        if run.text == "対象サイト名"]
+                self.assertEqual(len(runs), 1)
+                self.assertEqual(runs[0].hyperlink.address, url if link else None)
+
     def test_unassigned_peek_appears_once_on_last_data_slide_before_operations(self):
         Image.new("RGB", (1280, 800), "white").save(self.base / "main.png")
         Image.new("RGB", (240, 70), "navy").save(self.base / "peek.png")
@@ -232,7 +255,8 @@ class MergeCapturesTests(unittest.TestCase):
 
     def test_each_changed_capture_parameter_requires_recapture(self):
         changes = {"goto": "https://example.com/other", "target": ["#a", "#extra"],
-                   "mark": "#different", "pad": 20, "wait_ms": 3000}
+                   "mark": "#different", "pad": 20, "wait_ms": 3000,
+                   "wait_for": {"css": "#a", "has_text": "ready"}, "timeout_ms": 45000}
         for key, value in changes.items():
             with self.subTest(key=key):
                 deck = copy.deepcopy(self.deck)

@@ -16,9 +16,9 @@ E（Playwright実行結果）は[インポート計画](import-results.md)から
 |---|---|---|
 | `title` | 必須 | 資料タイトル（表紙・フッター） |
 | `subtitle` | | 表紙のサブタイトル |
-| `site` / `start_url` | | 表紙の「対象サイト」。`start_url` はリンクにもなる |
+| `site` / `start_url` / `link` | | 表紙には `site` だけを表示し、`start_url` はサイト名のリンク先にする。トップレベルの `"link": false` で表紙のリンクを付けない |
 | `date` | | 作成日。省略時は実行日 |
-| `browser` | | `viewport`（既定 `[1280, 800]`）、`device_scale_factor`（既定 2）、`locale`、`timezone`、`user_agent`、`timeout_ms`、`settle_ms` |
+| `browser` | | `viewport`（既定 `[1280, 800]`）、`device_scale_factor`（既定 2）、`locale`、`timezone`、`user_agent`、`timeout_ms`（既定 30000）、`settle_ms` |
 | `data_layout` | 必須 | 下記 |
 | `shots` | 必須 | 画面（撮影単位）の配列。遷移順に並べる |
 
@@ -49,6 +49,7 @@ E（Playwright実行結果）は[インポート計画](import-results.md)から
 | `notes` | 右パネル下の補足（「※」付きで表示）。例: 一覧の各商品について⑤以降を繰り返します |
 | `next` | 「次の画面」の表示名。省略時は次の shot の `screen` |
 | `wait_ms` | 画面表示後の追加待ち（非同期で出る値を待つ）。その画面の `peeks` にも効く |
+| `timeout_ms` | 要素の表示・座標の安定を待つ上限。省略時は `browser.timeout_ms`。その画面の `peeks` にも効く |
 | `blur` | `false` で入力後のフォーカス解除をしない（サジェストを写したいとき） |
 | `variant` / `diff` | 表示パターンの専用スライドにする（下記「表示の違い」） |
 | `peeks` | 他ページの小さな切り抜き（下記「表示の違い」） |
@@ -101,6 +102,8 @@ E（Playwright実行結果）は[インポート計画](import-results.md)から
 | `{"text": "もっと見る"}` / `{"label": "…"}` / `{"alt": "…"}` / `{"title": "…"}` / `{"test_id": "…"}` | `get_by_text` / `get_by_label` / `get_by_alt_text` / `get_by_title` / `get_by_test_id` |
 | `{"css": "h6.title"}` | `locator("h6.title")` |
 | `"within": <target>` | 親要素の中で探す（`locator(親).get_by_role(...)`） |
+| `"frame": "iframe#stock"` | 指定した iframe 内で探す（`frame_locator(...)`） |
+| `"frame": ["iframe#outer", "iframe#inner"]` | 外側から順に入れ子の iframe 内で探す |
 | `"has_text": "…"` | `.filter(has_text="…")` |
 | `"nth": 0` | `.nth(0)`（`.first` は `"nth": 0`） |
 
@@ -109,6 +112,16 @@ E（Playwright実行結果）は[インポート計画](import-results.md)から
 ```json
 {"role": "link", "name": "コジマ au PAY マーケット店", "within": {"css": "section", "has_text": "ショップから探す"}}
 ```
+
+iframe 内の表にも、親ページ上の座標で赤枠を付ける。文字範囲の `fit: "text"`、`within`、別オリジンの iframe にも使える。
+
+```json
+{"frame": ["iframe#outer", "iframe#inner"], "css": "td.price", "within": {"css": "tbody tr", "nth": 0}}
+```
+
+画像マップの `area` は、対応する `img[usemap]` と `coords` から範囲を測る。`rect`・`circle`・`poly`・`default` に対応し、円・多角形には外接する赤枠を付ける。
+
+遅延表示は `wait_for` に取得値の表示条件を指定する。空のプレースホルダーも「表示中」と判定されるため、値の文言が分かるなら `{"css": ".price", "has_text": "円"}` のように絞る。固定の `wait_ms` は補助とし、必要なら `timeout_ms` を伸ばす。測定は期限内で座標が3回連続一致するまで待ち、一時的な再描画も再測定する。期限内に安定しない場合は撮影を失敗にする。
 
 書き方のコツ:
 
@@ -153,6 +166,7 @@ E（Playwright実行結果）は[インポート計画](import-results.md)から
 | `text` | 扱いのルール（顧客が読む文） |
 | `example` | 参照リンクの表示名（既定「表示例のページ」） |
 | `goto` / `target` | 切り抜くページと範囲（A/B/D）。`pad` で余白（CSS px、既定 8） |
+| `wait_for` / `wait_ms` / `timeout_ms` | 切り抜きページの表示条件・追加待ち・待機上限。`timeout_ms` は親 shot、次に `browser` の設定を引き継ぐ |
 | `mark` | 切り抜きの中で点線の赤枠を付ける場所 |
 | `image` / `box` / `mark_box` / `url` | C 用。手持ち画像と切り抜き範囲・点線枠の座標・参照リンク |
 | `link` | `false` でリンクを付けない |

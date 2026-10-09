@@ -1,6 +1,7 @@
 import copy
 import importlib.util
 import json
+import math
 import sys
 import tempfile
 import types
@@ -8,6 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from PIL import Image, PngImagePlugin
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "capture.py"
 spec = importlib.util.spec_from_file_location("capture_under_test", SCRIPT)
@@ -46,8 +48,15 @@ class FakeLocator:
     def wait_for(self, **kwargs):
         assert self.selector in SCREENS[self.page.url], (self.page.url, self.selector)
 
-    def evaluate(self, script, fit):
-        return SCREENS[self.page.url][self.selector]["rect"]
+    def evaluate(self, script, fit=None, **kwargs):
+        if script == "el => el.tagName === 'AREA'":
+            return False
+        rect = SCREENS[self.page.url][self.selector]["rect"]
+        return {"rect": rect, "element": rect}
+
+    def bounding_box(self, **kwargs):
+        rect = SCREENS[self.page.url][self.selector]["rect"]
+        return dict(zip(("x", "y", "width", "height"), rect))
 
     def press_sequentially(self, value, **kwargs):
         self.page.values[self.selector] = value
@@ -80,26 +89,39 @@ class FakePage:
     def wait_for_timeout(self, milliseconds):
         pass
 
+    def set_default_timeout(self, milliseconds):
+        pass
+
     def evaluate(self, script, *args):
         if "scrollHeight" in script:
             return 800
+        if "[window.scrollX, window.scrollY]" in script:
+            return [0, 0]
         if "blur" in script or "scrollTo" in script:
             return None
         raise AssertionError(script)
 
     def screenshot(self, path, **kwargs):
         self.runtime.events.append(("screenshot", Path(path).name, self.url))
-        Path(path).write_text(json.dumps({"generation": self.runtime.generation,
-                                        "url": self.url, "values": self.values}), encoding="utf-8")
+        clip = kwargs.get("clip", {"width": 1280, "height": 800})
+        size = tuple(math.ceil(clip[k] * self.context.scale) for k in ("width", "height"))
+        info = PngImagePlugin.PngInfo()
+        for key, value in {"generation": self.runtime.generation, "url": self.url, "values": self.values}.items():
+            info.add_text(key, json.dumps(value))
+        Image.new("RGB", size, "white").save(path, pnginfo=info)
 
     def close(self):
         self.context.pages.remove(self)
 
 
 class FakeContext:
-    def __init__(self, runtime):
+    def __init__(self, runtime, scale):
         self.runtime = runtime
+        self.scale = scale
         self.pages = []
+
+    def set_default_timeout(self, milliseconds):
+        pass
 
     def new_page(self):
         page = FakePage(self)
@@ -112,7 +134,7 @@ class FakeBrowser:
         self.runtime = runtime
 
     def new_context(self, **kwargs):
-        return FakeContext(self.runtime)
+        return FakeContext(self.runtime, kwargs["device_scale_factor"])
 
     def close(self):
         pass
@@ -173,8 +195,8 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(saved["shots"][1]["captured_url"], "https://test/detail")
         self.assertEqual(saved["shots"][1]["steps"][0]["box"], [40, 200, 160, 80])
         self.assertEqual(saved["shots"][0]["image_size"], [2560, 1600])
-        entry = json.loads((self.output / saved["shots"][0]["image"]).read_text(encoding="utf-8"))
-        self.assertEqual(entry["values"], {"#query": "abc"})
+        with Image.open(self.output / saved["shots"][0]["image"]) as entry:
+            self.assertEqual(json.loads(entry.info["values"]), {"#query": "abc"})
         self.assertLess(events.index(("type", "#query", "abc")),
                         events.index(("screenshot", "01_entry.png", "https://test/start")))
         self.assertEqual([peek["captured_url"] for peek in saved["shots"][2]["peeks"]],
@@ -241,6 +263,40 @@ class CaptureTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "missing"):
                 capture.run(scenario(), self.output, False, {"missing"})
         browser.assert_not_called()
+
+    def test_fractional_scale_records_actual_png_sizes_for_shots_and_peeks(self):
+        source = scenario()
+        source["browser"].update(device_scale_factor=1.5, viewport=[1279, 799])
+        source["shots"][2]["peeks"][0]["pad"] = 8.5
+        saved, _ = self.run_capture(source)
+        for shot in saved["shots"]:
+            for capture_info in [shot, *shot.get("peeks", [])]:
+                with Image.open(self.output / capture_info["image"]) as image:
+                    self.assertEqual(capture_info["image_size"], list(image.size))
+        self.assertEqual(saved["shots"][0]["image_size"], [1919, 1199])
+        self.assertEqual(saved["shots"][1]["steps"][0]["box"], [30, 150, 120, 60])
+
+    def test_stability_waits_through_a_transient_error_and_movement(self):
+        values = iter([RuntimeError("re-render"), [[1, 2, 3, 4]], [[1, 2.25, 3, 4]],
+                       [[1, 2.25, 3, 4]], [[1, 2.25, 3, 4]]])
+        clock = [0]
+        page = types.SimpleNamespace(wait_for_timeout=lambda ms: clock.__setitem__(0, clock[0] + ms / 1000))
+        def measure(ms):
+            value = next(values)
+            if isinstance(value, Exception):
+                raise value
+            return value
+        with patch.object(capture, "monotonic", side_effect=lambda: clock[0]):
+            self.assertEqual(capture.stable(page, measure, 2000), [[1, 2.25, 3, 4]])
+        self.assertEqual(clock[0], 1)
+
+    def test_unstable_coordinates_fail_within_the_configured_timeout(self):
+        clock = [0]
+        page = types.SimpleNamespace(wait_for_timeout=lambda ms: clock.__setitem__(0, clock[0] + ms / 1000))
+        with patch.object(capture, "monotonic", side_effect=lambda: clock[0]):
+            with self.assertRaisesRegex(RuntimeError, "1000ms"):
+                capture.stable(page, lambda ms: [[clock[0], 0, 1, 1]], 1000)
+        self.assertEqual(clock[0], 1)
 
 
 if __name__ == "__main__":

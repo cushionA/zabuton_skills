@@ -3,15 +3,54 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
+from time import monotonic
 
+from PIL import Image
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
 BEFORE_ACTIONS = {"fill", "type", "select", "check", "uncheck", "hover", "focus"}
 
+AREA_IMAGE_JS = """el => {
+  const map = el.closest('map');
+  return map && [...document.querySelectorAll('img[usemap]')].find(
+    img => img.getAttribute('usemap').split('#').pop() === (map.name || map.id));
+}"""
+
 RECT_JS = """(el, fit) => {
+  let reference = el;
   let rects = [];
-  if (fit === 'text') {
+  if (el.tagName === 'AREA') {
+    const map = el.closest('map');
+    reference = map && [...document.querySelectorAll('img[usemap]')].find(
+      img => img.getAttribute('usemap').split('#').pop() === (map.name || map.id));
+    if (!reference) throw new Error('area に対応する img[usemap] がありません');
+    const r = reference.getBoundingClientRect();
+    const cs = getComputedStyle(reference);
+    const sx = r.width / reference.offsetWidth, sy = r.height / reference.offsetHeight;
+    const left = r.left + (reference.clientLeft + parseFloat(cs.paddingLeft)) * sx;
+    const top = r.top + (reference.clientTop + parseFloat(cs.paddingTop)) * sy;
+    const coords = el.coords.trim().split(/[\\s,]+/).map(Number);
+    const shape = (el.shape || 'rect').toLowerCase();
+    let x1, y1, x2, y2;
+    if (shape === 'default') {
+      x1 = y1 = 0;
+      x2 = reference.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      y2 = reference.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    } else if (shape === 'rect' && coords.length === 4) {
+      x1 = Math.min(coords[0], coords[2]); y1 = Math.min(coords[1], coords[3]);
+      x2 = Math.max(coords[0], coords[2]); y2 = Math.max(coords[1], coords[3]);
+    } else if (shape === 'circle' && coords.length === 3) {
+      x1 = coords[0] - coords[2]; y1 = coords[1] - coords[2];
+      x2 = coords[0] + coords[2]; y2 = coords[1] + coords[2];
+    } else if (shape === 'poly' && coords.length >= 6 && coords.length % 2 === 0) {
+      const xs = coords.filter((_, i) => i % 2 === 0), ys = coords.filter((_, i) => i % 2 === 1);
+      x1 = Math.min(...xs); y1 = Math.min(...ys); x2 = Math.max(...xs); y2 = Math.max(...ys);
+    } else throw new Error('area の shape / coords が不正です');
+    if (!coords.every(Number.isFinite)) throw new Error('area の coords が不正です');
+    rects = [{left: left + x1 * sx, top: top + y1 * sy,
+              right: left + x2 * sx, bottom: top + y2 * sy}];
+  } else if (fit === 'text') {
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     let n;
     while ((n = walker.nextNode())) {
@@ -29,7 +68,8 @@ RECT_JS = """(el, fit) => {
     x1 = Math.min(x1, r.left); y1 = Math.min(y1, r.top);
     x2 = Math.max(x2, r.right); y2 = Math.max(y2, r.bottom);
   }
-  return [x1 + window.scrollX, y1 + window.scrollY, x2 - x1, y2 - y1];
+  const r = reference.getBoundingClientRect();
+  return {rect: [x1, y1, x2 - x1, y2 - y1], element: [r.left, r.top, r.width, r.height]};
 }"""
 
 
@@ -37,6 +77,9 @@ def locate(page, target):
     if isinstance(target, str):
         return page.locator(target)
     t = dict(target)
+    frames = t.pop("frame", [])
+    for selector in frames if isinstance(frames, list) else [frames]:
+        page = page.frame_locator(selector)
     base = locate(page, t.pop("within")) if "within" in t else page
     exact = t.get("exact")
     if "role" in t:
@@ -134,6 +177,7 @@ def perform(page, ctx, action, target, timeout, settle_ms):
         page.wait_for_timeout(800)
         if len(ctx.pages) > pages_before:
             page = ctx.pages[-1]
+            page.set_default_timeout(timeout)
             page.wait_for_load_state("domcontentloaded")
         settle(page, settle_ms)
     return page
@@ -142,10 +186,38 @@ def perform(page, ctx, action, target, timeout, settle_ms):
 def measure(page, target, timeout, fit):
     targets = target if isinstance(target, list) else [target]
     rects = []
+    deadline = monotonic() + timeout / 1000
+
+    def remaining():
+        return max(1, int((deadline - monotonic()) * 1000))
+
     for t in targets:
         loc = locate(page, t).first
-        loc.wait_for(state="visible", timeout=timeout)
-        rects.append(loc.evaluate(RECT_JS, fit))
+        loc.wait_for(state="attached", timeout=remaining())
+        is_area = loc.evaluate("el => el.tagName === 'AREA'", timeout=remaining())
+        handle = None
+        try:
+            if is_area:
+                handle = loc.evaluate_handle(AREA_IMAGE_JS, timeout=remaining())
+                reference = handle.as_element()
+                if reference is None:
+                    raise PlaywrightError("area に対応する img[usemap] がありません")
+                reference.wait_for_element_state("visible", timeout=remaining())
+            else:
+                loc.wait_for(state="visible", timeout=remaining())
+                reference = loc
+            geometry = loc.evaluate(RECT_JS, fit, timeout=remaining())
+            box = reference.bounding_box() if is_area else reference.bounding_box(timeout=remaining())
+            if box is None or not geometry["element"][2] or not geometry["element"][3]:
+                raise PlaywrightError(f"target の表示座標を測定できません: {t}")
+            r, element = geometry["rect"], geometry["element"]
+            sx, sy = box["width"] / element[2], box["height"] / element[3]
+            scroll_x, scroll_y = page.evaluate("() => [window.scrollX, window.scrollY]")
+            rects.append([box["x"] + (r[0] - element[0]) * sx + scroll_x,
+                          box["y"] + (r[1] - element[1]) * sy + scroll_y, r[2] * sx, r[3] * sy])
+        finally:
+            if handle is not None:
+                handle.dispose()
     x1 = min(r[0] for r in rects)
     y1 = min(r[1] for r in rects)
     x2 = max(r[0] + r[2] for r in rects)
@@ -153,21 +225,36 @@ def measure(page, target, timeout, fit):
     return [x1, y1, x2 - x1, y2 - y1]
 
 
-def stable(page, fn, tries=6):
-    # 非同期で読み込まれる値（ポイント等）で位置がずれるため、座標が落ち着くまで測り直す
-    prev = [[round(v) for v in r] for r in fn()]
-    for _ in range(tries):
-        page.wait_for_timeout(400)
-        cur = [[round(v) for v in r] for r in fn()]
-        if cur == prev:
-            break
-        prev = cur
-    return prev
+def stable(page, fn, timeout):
+    # 再描画で一時的に消える要素も期限内で再測定する。操作やページアクセスは再実行しない。
+    deadline = monotonic() + timeout / 1000
+    prev, matches, last_error = None, 0, None
+    while monotonic() < deadline:
+        try:
+            rects = fn(max(1, int((deadline - monotonic()) * 1000)))
+            cur = [[round(v, 2) for v in r] for r in rects]
+            matches = matches + 1 if cur == prev else 1
+            prev = cur
+            last_error = None
+            if matches >= 3 and monotonic() < deadline:
+                return rects
+        except PlaywrightError as error:
+            prev, matches, last_error = None, 0, error
+        remaining = int((deadline - monotonic()) * 1000)
+        if remaining > 0:
+            page.wait_for_timeout(min(250, remaining))
+    raise PlaywrightError(f"対象要素の座標が {timeout}ms 以内に安定しませんでした") from last_error
+
+
+def image_size(path):
+    with Image.open(path) as image:
+        return list(image.size)
 
 
 def measure_steps(page, steps, timeout):
-    return [measure(page, s["target"], timeout, s.get("fit") or ("text" if s.get("kind") == "data" else "box"))
-            for s in steps]
+    deadline = monotonic() + timeout / 1000
+    return [measure(page, s["target"], max(1, int((deadline - monotonic()) * 1000)),
+                    s.get("fit") or ("text" if s.get("kind") == "data" else "box")) for s in steps]
 
 
 def capture_region(rects, vw, vh, doc_h):
@@ -203,22 +290,28 @@ def doc_height(page):
 def capture_peek(ctx, peek, path, dsf, vh, timeout, settle_ms):
     page = ctx.new_page()
     try:
+        timeout = peek.get("timeout_ms", timeout)
+        page.set_default_timeout(timeout)
         page.goto(peek["goto"], wait_until="domcontentloaded", timeout=60000)
         settle(page, peek.get("wait_ms", settle_ms))
-        rect = measure(page, peek["target"], timeout, "box")
+        if peek.get("wait_for"):
+            locate(page, peek["wait_for"]).first.wait_for(state="visible", timeout=timeout)
+        rect = stable(page, lambda ms: [measure(page, peek["target"], ms, "box")], timeout)[0]
         load_lazy_content(page, [rect], vh)
-        rect = stable(page, lambda: [measure(page, peek["target"], timeout, "box")])[0]
+        targets = [peek["target"]] + ([peek["mark"]] if peek.get("mark") else [])
+        measured = stable(page, lambda ms: measure_steps(page, [{"target": t} for t in targets], ms), timeout)
+        rect = measured[0]
         pad = peek.get("pad", 8)
         x, y = max(0, rect[0] - pad), max(0, rect[1] - pad)
         clip = [x, y, rect[0] + rect[2] + pad - x, min(rect[1] + rect[3] + pad, doc_height(page)) - y]
         page.screenshot(path=str(path), clip={"x": clip[0], "y": clip[1], "width": clip[2], "height": clip[3]},
                         full_page=True, animations="disabled")
         peek["image"] = path.name
-        peek["image_size"] = [int(clip[2] * dsf), int(clip[3] * dsf)]
+        peek["image_size"] = image_size(path)
         peek["scale"] = dsf
         peek["captured_url"] = page.url
         if peek.get("mark"):
-            m = measure(page, peek["mark"], timeout, "box")
+            m = measured[1]
             peek["mark_box"] = [round((m[0] - clip[0]) * dsf, 1), round((m[1] - clip[1]) * dsf, 1),
                                 round(m[2] * dsf, 1), round(m[3] * dsf, 1)]
     finally:
@@ -257,7 +350,7 @@ def run(scenario, out_dir, headed, only):
     browser_cfg = scenario.get("browser", {})
     vw, vh = browser_cfg.get("viewport", [1280, 800])
     dsf = browser_cfg.get("device_scale_factor", 2)
-    timeout = browser_cfg.get("timeout_ms", 15000)
+    default_timeout = browser_cfg.get("timeout_ms", 30000)
     settle_ms = browser_cfg.get("settle_ms", 1500)
     out_dir.mkdir(parents=True, exist_ok=True)
     deck = json.loads(json.dumps(scenario))
@@ -280,6 +373,7 @@ def run(scenario, out_dir, headed, only):
             timezone_id=browser_cfg.get("timezone", "Asia/Tokyo"),
             user_agent=user_agent,
         )
+        ctx.set_default_timeout(default_timeout)
         page = ctx.new_page()
 
         for index, shot in enumerate(deck["shots"], 1):
@@ -287,6 +381,8 @@ def run(scenario, out_dir, headed, only):
             if shot.get("image") or index - 1 not in targets:
                 continue
             try:
+                timeout = shot.get("timeout_ms", default_timeout)
+                page.set_default_timeout(timeout)
                 if shot.get("goto"):
                     page.goto(shot["goto"], wait_until="domcontentloaded", timeout=60000)
                 settle(page, shot.get("wait_ms", settle_ms))
@@ -310,9 +406,9 @@ def run(scenario, out_dir, headed, only):
                 if not only or shot_id in only:
                     framed = [s for s in steps if s.get("target")]
                     if framed:
-                        rects = measure_steps(page, framed, timeout)
+                        rects = stable(page, lambda ms: measure_steps(page, framed, ms), timeout)
                         load_lazy_content(page, rects, vh)
-                        rects = stable(page, lambda: measure_steps(page, framed, timeout))
+                        rects = stable(page, lambda ms: measure_steps(page, framed, ms), timeout)
                         clip = capture_region(rects, vw, vh, doc_height(page))
                     else:
                         rects = []
@@ -329,7 +425,7 @@ def run(scenario, out_dir, headed, only):
                         step["box"] = [round((r[0] - clip[0]) * dsf, 1), round((r[1] - clip[1]) * dsf, 1),
                                        round(r[2] * dsf, 1), round(r[3] * dsf, 1)]
                     shot["image"] = image_name
-                    shot["image_size"] = [int(clip[2] * dsf), int(clip[3] * dsf)]
+                    shot["image_size"] = image_size(out_dir / image_name)
                     shot["scale"] = dsf
                     shot["page_top"] = clip[1] == 0
                     shot["captured_url"] = page.url

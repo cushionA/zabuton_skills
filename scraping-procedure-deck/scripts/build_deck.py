@@ -786,6 +786,7 @@ class Builder:
             self.summary_slides(where)
         if self.inserting:
             self.move_new_slides()
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         self.prs.save(out_path)
 
     def move_new_slides(self):
@@ -936,11 +937,8 @@ class Builder:
         n_screen = sum(1 for i in self.layout.values() if i.get("on_screen", True))
         meta = []
         if d.get("site"):
-            site = [(d["site"], 12, C["ink"], False)]
-            if d.get("start_url"):
-                site.append(("（", 12, C["ink"], False))
-                site.append((d["start_url"], 12, C["link"], False, d["start_url"]))
-                site.append(("）", 12, C["ink"], False))
+            url = d.get("start_url") if d.get("link", True) else None
+            site = [(d["site"], 12, C["link"] if url else C["ink"], False, url)]
             meta.append(("対象サイト", site))
         if n_all:
             meta.append(("取得項目", [(f"{n_all}項目（うち画面から取得 {n_screen}項目）", 12, C["ink"], False)]))
@@ -1408,7 +1406,8 @@ def merge_captures(deck, deck_dir, captures_dir):
                 pk["image"] = str((deck_dir / pk["image"]).resolve())
             else:
                 if i >= len(src_peeks) or not src_peeks[i].get("image") or any(
-                        pk.get(key) != src_peeks[i].get(key) for key in ("goto", "target", "mark", "pad", "wait_ms")):
+                        pk.get(key) != src_peeks[i].get(key)
+                        for key in ("goto", "target", "mark", "pad", "wait_ms", "wait_for", "timeout_ms")):
                     raise SystemExit(f"shot '{shot.get('id')}' の peeks[{i}] の撮影定義が撮影時と違うか、画像がありません。"
                                      "capture.py で撮り直してください")
                 for key in ("image", "image_size", "scale", "mark_box", "captured_url"):
