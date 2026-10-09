@@ -256,7 +256,9 @@ class MergeCapturesTests(unittest.TestCase):
     def test_each_changed_capture_parameter_requires_recapture(self):
         changes = {"goto": "https://example.com/other", "target": ["#a", "#extra"],
                    "mark": "#different", "pad": 20, "wait_ms": 3000,
-                   "wait_for": {"css": "#a", "has_text": "ready"}, "timeout_ms": 45000}
+                   "wait_for": {"css": "#a", "has_text": "ready"}, "timeout_ms": 45000,
+                   "wait_url": "**/ready", "scroll_until": {"target": "#a"}, "capture_mode": "viewport",
+                   "setup": [{"target": "#tab", "action": "click"}]}
         for key, value in changes.items():
             with self.subTest(key=key):
                 deck = copy.deepcopy(self.deck)
@@ -266,6 +268,18 @@ class MergeCapturesTests(unittest.TestCase):
         del self.deck["shots"][0]["peeks"][0]["mark"]
         with self.assertRaisesRegex(SystemExit, "peeks.*撮り直"):
             self.merge(self.deck)
+
+    def test_changed_shot_readiness_or_scroll_requires_recapture(self):
+        changes = {"wait_url": "**/ready", "wait_for": [{"target": "#loader", "state": "hidden"}],
+                   "scroll_until": {"target": "#title", "container": "#list"}, "capture_mode": "viewport",
+                   "goto": "https://example.com/other", "setup": [{"action": {"fill": "new"}, "target": "#query"}],
+                   "wait_ms": 500, "timeout_ms": 45000, "blur": False}
+        for key, value in changes.items():
+            with self.subTest(key=key):
+                deck = copy.deepcopy(self.deck)
+                deck["shots"][0][key] = value
+                with self.assertRaisesRegex(SystemExit, "撮影定義.*撮り直"):
+                    self.merge(deck)
 
     def test_peek_wording_changes_keep_corresponding_images_and_coordinates(self):
         self.deck["shots"][0]["peeks"][0]["text"] = "修正した説明A"

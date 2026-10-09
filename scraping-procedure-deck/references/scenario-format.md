@@ -44,11 +44,14 @@ E（Playwright実行結果）は[インポート計画](import-results.md)から
 | `goto` | この画面を開くURL。A は最初の画面だけ、B は全画面に書く |
 | `url` / `link` | リンク先を明示するときは `url` を書く（既定は撮影時のURL）。ログインが必要など顧客が開けないページは `"link": false` |
 | `setup` | 撮影前の下準備（赤枠なし）。`[{"action": "hide", "target": ".popup"}]` など |
-| `wait_for` | この要素が表示されるまで待ってから撮る（`target` と同じ書き方） |
+| `wait_for` | 撮影前の表示条件。`target` と同じ書き方、または条件の配列。`{"target": "#loading", "state": "hidden"}` も使える |
+| `wait_url` | SPA等の遷移先URLを待つ。Playwrightのglob（例: `"**/detail/*"`） |
+| `scroll_until` | 指定した代表要素まで、上限付きでスクロールする（下記） |
+| `capture_mode` | `region`（従来の対象周辺の撮影）/`viewport`（現在の表示）。`scroll_until` がある場合の既定は `viewport`、それ以外は `region` |
 | `steps` | 手順・取得項目・注記（下記） |
 | `notes` | 右パネル下の補足（「※」付きで表示）。例: 一覧の各商品について⑤以降を繰り返します |
 | `next` | 「次の画面」の表示名。省略時は次の shot の `screen` |
-| `wait_ms` | 画面表示後の追加待ち（非同期で出る値を待つ）。その画面の `peeks` にも効く |
+| `wait_ms` | 画面表示後の補助的な追加待ち。その画面の `peeks` にも効く。表示完了は `wait_for` で確認する |
 | `timeout_ms` | 要素の表示・座標の安定を待つ上限。省略時は `browser.timeout_ms`。その画面の `peeks` にも効く |
 | `blur` | `false` で入力後のフォーカス解除をしない（サジェストを写したいとき） |
 | `variant` / `diff` | 表示パターンの専用スライドにする（下記「表示の違い」） |
@@ -123,6 +126,51 @@ iframe 内の表にも、親ページ上の座標で赤枠を付ける。文字�
 
 遅延表示は `wait_for` に取得値の表示条件を指定する。空のプレースホルダーも「表示中」と判定されるため、値の文言が分かるなら `{"css": ".price", "has_text": "円"}` のように絞る。固定の `wait_ms` は補助とし、必要なら `timeout_ms` を伸ばす。測定は期限内で座標が3回連続一致するまで待ち、一時的な再描画も再測定する。期限内に安定しない場合は撮影を失敗にする。
 
+### SPA・無限スクロール・仮想リスト
+
+`wait_for` は `setup` と撮影前の入力操作（`timing: "before"`）を終えてから確認する。SPAではURLの変化、ローディング表示の消失、取得値の更新を組み合わせる。常時接続やポーリングがあるページでも、通信が止まる `networkidle` は待たない。
+
+```json
+{
+  "id": "result", "screen": "検索結果", "goto": "https://example.com/search",
+  "capture_mode": "viewport",
+  "setup": [{"target": "#details", "action": "click"}],
+  "wait_url": "**/details",
+  "wait_for": [
+    {"target": "#loading", "state": "hidden"},
+    {"css": "#price", "has_text": "1,980円"}
+  ],
+  "steps": [{"kind": "data", "item": 4, "target": "#price"}]
+}
+```
+
+`state` は `visible`（既定）/`hidden`/`attached`/`detached`。配列の条件は順に待ち、合計の待機上限は `timeout_ms`。`hidden` は要素が存在しない場合にも成立するので、更新後の値の条件も指定する。
+
+無限スクロールは、合意済みの代表行を `scroll_until.target` に指定する。行がまだDOMにない場合も少しずつ進め、表示されたらその行を画面内へ移す。リスト内だけをスクロールする場合は `container` を指定する。iframe内なら `container` と `target` の両方に `frame` を指定する。
+
+```json
+{
+  "id": "list", "screen": "商品一覧", "goto": "https://example.com/products",
+  "scroll_until": {"target": "[data-id='sample-24']", "container": "#results",
+                   "max_steps": 20, "wait_ms": 500},
+  "wait_for": {"css": "[data-id='sample-24'] .price", "has_text": "円"},
+  "steps": [{"kind": "data", "item": 4, "target": "[data-id='sample-24'] .price"}]
+}
+```
+
+| `scroll_until` のキー | 内容 |
+|---|---|
+| `target` | 必須。探す代表要素。通常の `target` と同じ書き方 |
+| `container` | スクロールする要素。省略時は親ページのウィンドウ |
+| `max_steps` | スクロール回数の上限（既定 20）。0なら初期表示の確認だけ |
+| `step_px` | 1回の移動量（CSS px）。既定はウィンドウまたはコンテナの高さの70% |
+| `wait_ms` | 各スクロール後の待ち（既定 500ms） |
+| `timeout_ms` | 探索時間の上限。省略時は親 shot / peek の上限 |
+
+仮想リストは、画面外の行がDOMから消えるため `viewport` で現在の表示を撮る。先頭に戻したり、全行の長い画像を作ったりしない。赤枠の対象が画面外なら失敗にするため、離れた行は shot を分ける。通常の追加型リストを広く写す必要がある場合のみ `capture_mode: "region"` を明示する。見つからない場合は回数または時間の上限で失敗し、ページ全体の収集は続けない。
+
+クリックで追加される一覧は `setup` のクリックを具体的な回数だけ記述する。独自のCanvas描画などDOMで要素を特定できない画面は、手持ち画像のC方式で扱う。
+
 書き方のコツ:
 
 - ハッシュ付きのクラス（`Price_price__HskDt`）は前方一致で `[class*='Price_price__']` と書く
@@ -142,6 +190,13 @@ iframe 内の表にも、親ページ上の座標で赤枠を付ける。文字�
 | `{"wait": 1000}` | 待機（ミリ秒） |
 | `{"goto": "https://..."}` | URL を開く |
 | `"hide"` | `setup` 専用。要素を見えなくする（ポップアップ・同意バナー等。同意ボタンは押さない） |
+
+操作の直後にも表示条件を待てる。複数キーのオブジェクトでは操作名を `type`、入力値等を `value` に書く。
+
+```json
+{"type": "click", "wait_url": "**/details", "wait_for": {"css": "#title", "has_text": "商品A"}}
+{"type": "fill", "value": "靴", "wait_for": {"css": "#results", "has_text": "靴の検索結果"}}
+```
 
 ## 表示の違い
 
@@ -166,7 +221,8 @@ iframe 内の表にも、親ページ上の座標で赤枠を付ける。文字�
 | `text` | 扱いのルール（顧客が読む文） |
 | `example` | 参照リンクの表示名（既定「表示例のページ」） |
 | `goto` / `target` | 切り抜くページと範囲（A/B/D）。`pad` で余白（CSS px、既定 8） |
-| `wait_for` / `wait_ms` / `timeout_ms` | 切り抜きページの表示条件・追加待ち・待機上限。`timeout_ms` は親 shot、次に `browser` の設定を引き継ぐ |
+| `setup` / `wait_for` / `wait_url` / `scroll_until` / `capture_mode` | shotと同じ下準備・表示条件・探索・撮影方式。`viewport` は現在の表示のPNGから切り抜き、仮想リストを先頭へ戻さない |
+| `wait_ms` / `timeout_ms` | 追加待ち・待機上限。`timeout_ms` は親 shot、次に `browser` の設定を引き継ぐ |
 | `mark` | 切り抜きの中で点線の赤枠を付ける場所 |
 | `image` / `box` / `mark_box` / `url` | C 用。手持ち画像と切り抜き範囲・点線枠の座標・参照リンク |
 | `link` | `false` でリンクを付けない |
@@ -253,7 +309,7 @@ A/B と C を混ぜる場合、`image` のある shot は撮影を飛ばすの�
 
 | オプション | 内容 |
 |---|---|
-| `--captures DIR` | 撮影結果を使う。文言は scenario.json から読むので、文言だけの修正なら撮り直し不要。`peeks` の並びや撮影条件（`goto` / `target` / `mark` / `pad` / `wait_ms`）を変えた場合は、その shot を撮り直す |
+| `--captures DIR` | 撮影結果を使う。文言は scenario.json から読むので、文言だけの修正なら撮り直し不要。shotの下準備・表示条件・スクロール・撮影方式、`peeks` の並びや撮影条件を変えた場合は、その shot を撮り直す |
 | `--base 既存.pptx` | 既存資料に差し込む。そのタイトルのみレイアウト・本文領域・テーマ色・フォント・フッターに合わせる |
 | `--insert-at N` | 差し込む位置（N枚目として入る。省略時は末尾）。セクションがあれば直前のスライドのセクションに入る |
 | `--sections` | `cover,overview,steps,summary` から選ぶ。既定は通常が全部、差し込みは表紙なし、`--only` 指定時は steps のみ |

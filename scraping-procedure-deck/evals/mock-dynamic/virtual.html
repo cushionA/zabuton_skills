@@ -1,0 +1,27 @@
+<!doctype html><meta charset="utf-8">
+<style>
+  body {margin:0; height:1600px}
+  #results {position:absolute; left:51.25px; top:651.5px; width:241px; height:211px;
+    overflow:auto; border:2px solid black; background:white}
+  #spacer {height:3000px; position:relative}
+  .row {position:absolute; left:13.25px; width:181.5px; height:40.5px; background:#ddd}
+  .row span {display:block; padding:12px}
+  #row24 {background:rgb(26,199,90)}
+</style>
+<div id="results"><div id="spacer"></div></div>
+<script>
+  const list = document.querySelector('#results'), spacer = document.querySelector('#spacer');
+  let timer;
+  function render() {
+    const first = Math.floor(list.scrollTop / 50);
+    spacer.replaceChildren();
+    for (let i = first; i < Math.min(first + 5, 60); i++) {
+      const row = document.createElement('div');
+      row.className = 'row'; row.id = `row${i}`; row.style.top = `${i * 50}px`;
+      row.innerHTML = `<span>商品 ${i}</span>`;
+      spacer.appendChild(row);
+    }
+  }
+  list.addEventListener('scroll', () => {clearTimeout(timer); timer = setTimeout(render, 80)});
+  render();
+</script>

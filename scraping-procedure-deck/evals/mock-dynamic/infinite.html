@@ -1,0 +1,26 @@
+<!doctype html><meta charset="utf-8">
+<style>
+  body {margin:0; background:white}
+  .row {height:181px; width:301px; margin:19px 0 0 51px; background:#ddd}
+  .row span {display:block; padding:12px}
+  #row12 {background:rgb(26,199,90)}
+</style>
+<main id="results"></main><div id="loading" hidden>読み込み中</div>
+<script>
+  let count = 0, busy = false;
+  function append() {
+    for (let n = 0; n < 4; n++) {
+      const row = document.createElement('div');
+      row.id = `row${count}`; row.className = 'row'; row.innerHTML = `<span>商品 ${count++}</span>`;
+      document.querySelector('#results').appendChild(row);
+    }
+    busy = false; document.querySelector('#loading').hidden = true;
+  }
+  function load() {
+    if (!busy && count < 16 && window.scrollY + innerHeight >= document.body.scrollHeight - 80) {
+      busy = true; document.querySelector('#loading').hidden = false;
+      setTimeout(append, 180);
+    }
+  }
+  append(); window.addEventListener('scroll', load);
+</script>

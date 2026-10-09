@@ -1,0 +1,29 @@
+<!doctype html><meta charset="utf-8">
+<style>
+  body {margin:0; background:white}
+  button {position:absolute;left:51px;top:41px}
+  input {position:absolute;left:51px;top:91px}
+  #value {position:absolute;left:51px;top:151px;width:181px;height:41px;background:#ddd}
+  #value span {display:block;padding:12px}
+  #loading {position:absolute;left:51px;top:201px}
+</style>
+<button id="details">詳細を開く</button><input id="query"><div id="value"><span>旧データ</span></div>
+<div id="loading" hidden>読み込み中</div>
+<script>
+  const value = document.querySelector('#value'), loading = document.querySelector('#loading');
+  let timer;
+  function update(text) {
+    loading.hidden = false;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      value.innerHTML = `<span>${text}</span>`;
+      value.style.background = 'rgb(26,199,90)'; loading.hidden = true;
+    }, 1400);
+  }
+  document.querySelector('#details').onclick = () => {
+    history.pushState({}, '', '/details'); update('詳細の新データ');
+  };
+  document.querySelector('#query').oninput = e => update(`検索結果: ${e.target.value}`);
+  // ブラウザを閉じるまで終わらない通信。描画の完了は取得値で確認する。
+  fetch('/pending').catch(() => {});
+</script>

@@ -2,6 +2,8 @@ import argparse
 import json
 import sys
 from datetime import datetime
+from io import BytesIO
+from math import ceil, floor, isfinite
 from pathlib import Path
 from time import monotonic
 
@@ -72,6 +74,27 @@ RECT_JS = """(el, fit) => {
   return {rect: [x1, y1, x2 - x1, y2 - y1], element: [r.left, r.top, r.width, r.height]};
 }"""
 
+VISIBLE_RECT_JS = """(el, fit) => {
+  const r = (""" + RECT_JS + """)(el, fit).rect;
+  const outside = (left, top, right, bottom, clipX = true, clipY = true) =>
+    (clipX && (r[0] < left - 1 || r[0] + r[2] > right + 1)) ||
+    (clipY && (r[1] < top - 1 || r[1] + r[3] > bottom + 1));
+  const win = el.ownerDocument.defaultView;
+  if (outside(0, 0, win.innerWidth, win.innerHeight)) return false;
+  const reference = el.tagName === 'AREA' ? (""" + AREA_IMAGE_JS + """)(el) : el;
+  for (let p = reference.parentElement; p; p = p.parentElement) {
+    const cs = getComputedStyle(p), b = p.getBoundingClientRect();
+    const clips = value => /^(hidden|clip|scroll|auto)$/.test(value);
+    if (!clips(cs.overflowX) && !clips(cs.overflowY)) continue;
+    const sx = p.offsetWidth ? b.width / p.offsetWidth : 1;
+    const sy = p.offsetHeight ? b.height / p.offsetHeight : 1;
+    const left = b.left + p.clientLeft * sx, top = b.top + p.clientTop * sy;
+    if (outside(left, top, left + p.clientWidth * sx, top + p.clientHeight * sy,
+                clips(cs.overflowX), clips(cs.overflowY))) return false;
+  }
+  return true;
+}"""
+
 
 def locate(page, target):
     if isinstance(target, str):
@@ -123,11 +146,99 @@ def timing_of(step, action):
 
 
 def settle(page, ms):
-    try:
-        page.wait_for_load_state("networkidle", timeout=10000)
-    except PlaywrightError:
-        pass
+    # ポーリングや常時接続のあるSPAではnetworkidleを表示完了の条件にしない。
     page.wait_for_timeout(ms)
+
+
+def wait_ready(page, config, timeout):
+    deadline = monotonic() + timeout / 1000
+
+    def remaining():
+        return max(1, int((deadline - monotonic()) * 1000))
+
+    if config.get("wait_url"):
+        page.wait_for_url(config["wait_url"], wait_until="domcontentloaded", timeout=remaining())
+    conditions = config.get("wait_for", [])
+    if not isinstance(conditions, list):
+        conditions = [conditions]
+    for condition in conditions:
+        if isinstance(condition, dict) and "target" in condition:
+            target, state = condition["target"], condition.get("state", "visible")
+        else:
+            target, state = condition, "visible"
+        if state not in ("visible", "hidden", "attached", "detached"):
+            raise SystemExit(f"wait_for の state が不正です: {state}")
+        locate(page, target).first.wait_for(state=state, timeout=remaining())
+
+
+def scroll_until(page, config, timeout):
+    if not isinstance(config, dict) or not config.get("target"):
+        raise SystemExit("scroll_until には target を指定してください")
+    max_steps = config.get("max_steps", 20)
+    wait_ms = config.get("wait_ms", 500)
+    step_px = config.get("step_px")
+    timeout = config.get("timeout_ms", timeout)
+    if (not isinstance(max_steps, int) or max_steps < 0 or timeout <= 0 or wait_ms < 0
+            or (step_px is not None and (not isfinite(step_px) or step_px <= 0))):
+        raise SystemExit("scroll_until の回数・時間・移動量が不正です")
+    deadline = monotonic() + timeout / 1000
+    target = locate(page, config["target"]).first
+    container = locate(page, config["container"]).first if config.get("container") else None
+    for index in range(max_steps + 1):
+        remaining = max(1, int((deadline - monotonic()) * 1000))
+        if monotonic() >= deadline:
+            break
+        try:
+            if target.is_visible():
+                target.scroll_into_view_if_needed(timeout=remaining)
+                return
+            if index == max_steps:
+                break
+            if container is not None:
+                container.evaluate("(el, step) => el.scrollBy({top: step || el.clientHeight * 0.7, behavior: 'instant'})",
+                                   step_px, timeout=remaining)
+            else:
+                page.evaluate("step => window.scrollBy({top: step || window.innerHeight * 0.7, behavior: 'instant'})",
+                              step_px)
+        except PlaywrightError:
+            # 仮想リストの行の差し替えや、コンテナの再描画は期限内だけ再試行する。
+            pass
+        remaining = int((deadline - monotonic()) * 1000)
+        if remaining > 0:
+            page.wait_for_timeout(min(wait_ms, remaining))
+    raise PlaywrightError(f"scroll_until: {config['target']} が {max_steps}回 / {timeout}ms 以内に表示されませんでした")
+
+
+def prepare_view(page, config, timeout):
+    # URL遷移後に対象までスクロールし、その時点の読み込み・取得値を確認する。
+    if config.get("wait_url"):
+        wait_ready(page, {"wait_url": config["wait_url"]}, timeout)
+    if config.get("scroll_until") is not None:
+        scroll_until(page, config["scroll_until"], timeout)
+    wait_ready(page, {"wait_for": config.get("wait_for", [])}, timeout)
+
+
+def capture_mode(config):
+    mode = config.get("capture_mode", "viewport" if config.get("scroll_until") is not None else "region")
+    if mode not in ("region", "viewport"):
+        raise SystemExit(f"capture_mode が不正です: {mode}")
+    return mode
+
+
+def viewport_clip(page, rects, steps=(), timeout=30000):
+    x, y, width, height = page.evaluate("() => [window.scrollX, window.scrollY, window.innerWidth, window.innerHeight]")
+    for r in rects:
+        if r[0] < x - 1 or r[1] < y - 1 or r[0] + r[2] > x + width + 1 or r[1] + r[3] > y + height + 1:
+            raise PlaywrightError("viewport撮影の対象が画面外にあります。対象までスクロールするかshotを分けてください")
+    deadline = monotonic() + timeout / 1000
+    for step in steps:
+        targets = step["target"] if isinstance(step["target"], list) else [step["target"]]
+        fit = step.get("fit") or ("text" if step.get("kind") == "data" else "box")
+        for target in targets:
+            if not locate(page, target).first.evaluate(VISIBLE_RECT_JS, fit,
+                                                      timeout=max(1, int((deadline - monotonic()) * 1000))):
+                raise PlaywrightError("viewport撮影の対象がスクロール領域やframeで切れています。対象までスクロールするかshotを分けてください")
+    return [x, y, width, height]
 
 
 def perform(page, ctx, action, target, timeout, settle_ms):
@@ -136,18 +247,22 @@ def perform(page, ctx, action, target, timeout, settle_ms):
     pages_before = len(ctx.pages)
     if kind == "wait":
         page.wait_for_timeout(int(value or 1000))
+        wait_ready(page, action, timeout)
         return page
     if kind == "goto":
         page.goto(value, wait_until="domcontentloaded", timeout=60000)
         settle(page, settle_ms)
+        wait_ready(page, action, timeout)
         return page
     if kind == "press" and not target:
         page.keyboard.press(value)
         settle(page, settle_ms)
+        wait_ready(page, action, timeout)
         return page
     if kind == "hide":
         locate(page, target).evaluate_all(
             "els => els.forEach(e => e.style.setProperty('visibility', 'hidden', 'important'))")
+        wait_ready(page, action, timeout)
         return page
     loc = locate(page, target).first
     loc.wait_for(state="visible", timeout=timeout)
@@ -180,6 +295,7 @@ def perform(page, ctx, action, target, timeout, settle_ms):
             page.set_default_timeout(timeout)
             page.wait_for_load_state("domcontentloaded")
         settle(page, settle_ms)
+    wait_ready(page, action, timeout)
     return page
 
 
@@ -294,18 +410,39 @@ def capture_peek(ctx, peek, path, dsf, vh, timeout, settle_ms):
         page.set_default_timeout(timeout)
         page.goto(peek["goto"], wait_until="domcontentloaded", timeout=60000)
         settle(page, peek.get("wait_ms", settle_ms))
-        if peek.get("wait_for"):
-            locate(page, peek["wait_for"]).first.wait_for(state="visible", timeout=timeout)
-        rect = stable(page, lambda ms: [measure(page, peek["target"], ms, "box")], timeout)[0]
-        load_lazy_content(page, [rect], vh)
+        for item in peek.get("setup", []):
+            page = perform(page, ctx, norm_action(item["action"]), item.get("target"), timeout, settle_ms)
+        prepare_view(page, peek, timeout)
+        mode = capture_mode(peek)
+        if mode == "region":
+            rect = stable(page, lambda ms: [measure(page, peek["target"], ms, "box")], timeout)[0]
+            load_lazy_content(page, [rect], vh)
         targets = [peek["target"]] + ([peek["mark"]] if peek.get("mark") else [])
-        measured = stable(page, lambda ms: measure_steps(page, [{"target": t} for t in targets], ms), timeout)
+        target_steps = [{"target": t} for t in targets]
+        measured = stable(page, lambda ms: measure_steps(page, target_steps, ms), timeout)
         rect = measured[0]
         pad = peek.get("pad", 8)
-        x, y = max(0, rect[0] - pad), max(0, rect[1] - pad)
-        clip = [x, y, rect[0] + rect[2] + pad - x, min(rect[1] + rect[3] + pad, doc_height(page)) - y]
-        page.screenshot(path=str(path), clip={"x": clip[0], "y": clip[1], "width": clip[2], "height": clip[3]},
-                        full_page=True, animations="disabled")
+        if mode == "viewport":
+            view = viewport_clip(page, measured, target_steps, timeout)
+            # 現在の表示のPNGを整数ピクセルで切り抜き、仮想リストを再配置させない。
+            with Image.open(BytesIO(page.screenshot(full_page=False, animations="disabled"))) as image:
+                left = max(0, floor((rect[0] - view[0] - pad) * dsf))
+                top = max(0, floor((rect[1] - view[1] - pad) * dsf))
+                right = min(image.width, ceil((rect[0] + rect[2] - view[0] + pad) * dsf))
+                bottom = min(image.height, ceil((rect[1] + rect[3] - view[1] + pad) * dsf))
+                image.crop((left, top, right, bottom)).save(path)
+            clip = [view[0] + left / dsf, view[1] + top / dsf]
+            if peek.get("mark"):
+                m = measured[1]
+                if (m[0] < clip[0] - 1 or m[1] < clip[1] - 1
+                        or m[0] + m[2] > view[0] + right / dsf + 1
+                        or m[1] + m[3] > view[1] + bottom / dsf + 1):
+                    raise PlaywrightError("peekのmarkが切り抜き範囲外にあります。targetにmarkを含めてください")
+        else:
+            x, y = max(0, rect[0] - pad), max(0, rect[1] - pad)
+            clip = [x, y, rect[0] + rect[2] + pad - x, min(rect[1] + rect[3] + pad, doc_height(page)) - y]
+            page.screenshot(path=str(path), clip={"x": clip[0], "y": clip[1], "width": clip[2], "height": clip[3]},
+                            full_page=True, animations="disabled")
         peek["image"] = path.name
         peek["image_size"] = image_size(path)
         peek["scale"] = dsf
@@ -388,9 +525,6 @@ def run(scenario, out_dir, headed, only):
                 settle(page, shot.get("wait_ms", settle_ms))
                 for item in shot.get("setup", []):
                     page = perform(page, ctx, norm_action(item["action"]), item.get("target"), timeout, settle_ms)
-                if shot.get("wait_for"):
-                    locate(page, shot["wait_for"]).first.wait_for(state="visible", timeout=timeout)
-
                 steps = shot.get("steps", [])
                 prepared = False
                 for step in steps:
@@ -402,24 +536,31 @@ def run(scenario, out_dir, headed, only):
                     # 入力直後のサジェスト等が画面を覆うので、フォーカスを外して閉じてから撮る
                     page.evaluate("() => document.activeElement && document.activeElement.blur()")
                     page.wait_for_timeout(600)
+                prepare_view(page, shot, timeout)
 
                 if not only or shot_id in only:
+                    mode = capture_mode(shot)
                     framed = [s for s in steps if s.get("target")]
                     if framed:
                         rects = stable(page, lambda ms: measure_steps(page, framed, ms), timeout)
-                        load_lazy_content(page, rects, vh)
-                        rects = stable(page, lambda ms: measure_steps(page, framed, ms), timeout)
-                        clip = capture_region(rects, vw, vh, doc_height(page))
+                        if mode == "region":
+                            load_lazy_content(page, rects, vh)
+                            rects = stable(page, lambda ms: measure_steps(page, framed, ms), timeout)
                     else:
                         rects = []
-                        clip = [0, 0, vw, vh]
+                    if mode == "viewport":
+                        clip = viewport_clip(page, rects, framed, timeout)
+                        screenshot_options = {"full_page": False}
+                    else:
+                        clip = capture_region(rects, vw, vh, doc_height(page)) if rects else [0, 0, vw, vh]
+                        screenshot_options = {"clip": {"x": clip[0], "y": clip[1], "width": clip[2], "height": clip[3]},
+                                              "full_page": True}
 
                     image_name = f"{index:02d}_{shot_id}.png"
                     page.screenshot(
                         path=str(out_dir / image_name),
-                        clip={"x": clip[0], "y": clip[1], "width": clip[2], "height": clip[3]},
-                        full_page=True,
                         animations="disabled",
+                        **screenshot_options,
                     )
                     for step, r in zip(framed, rects):
                         step["box"] = [round((r[0] - clip[0]) * dsf, 1), round((r[1] - clip[1]) * dsf, 1),

@@ -1390,6 +1390,9 @@ def merge_captures(deck, deck_dir, captures_dir):
         src = by_id.get(shot.get("id"))
         if src is None or not src.get("image"):
             continue
+        if any(shot.get(key) != src.get(key) for key in
+               ("goto", "setup", "wait_ms", "wait_for", "wait_url", "timeout_ms", "blur", "scroll_until", "capture_mode")):
+            raise SystemExit(f"shot '{shot.get('id')}' の撮影定義が撮影時と違います。capture.py で撮り直してください")
         steps, src_steps = shot.get("steps", []), src.get("steps", [])
         if [s.get("target") for s in steps] != [s.get("target") for s in src_steps]:
             raise SystemExit(f"shot '{shot.get('id')}' の手順の数か target が撮影時と違います。capture.py で撮り直してください")
@@ -1407,7 +1410,8 @@ def merge_captures(deck, deck_dir, captures_dir):
             else:
                 if i >= len(src_peeks) or not src_peeks[i].get("image") or any(
                         pk.get(key) != src_peeks[i].get(key)
-                        for key in ("goto", "target", "mark", "pad", "wait_ms", "wait_for", "timeout_ms")):
+                        for key in ("goto", "target", "mark", "pad", "setup", "wait_ms", "wait_for", "wait_url",
+                                    "timeout_ms", "scroll_until", "capture_mode")):
                     raise SystemExit(f"shot '{shot.get('id')}' の peeks[{i}] の撮影定義が撮影時と違うか、画像がありません。"
                                      "capture.py で撮り直してください")
                 for key in ("image", "image_size", "scale", "mark_box", "captured_url"):

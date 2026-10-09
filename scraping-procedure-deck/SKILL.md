@@ -182,6 +182,7 @@ Windows は PowerPoint で、それ以外は LibreOffice で描画する。全�
 - ポップアップやバナーは `setup` の `hide` で隠す。Cookie同意などは「同意」を押さない
 - ヘッドレスブラウザ特有の UA で表示を変えるサイトがあるため、UA は通常の Chrome 表記に揃えている。例: au PAY マーケットはポイント表示が出なくなる
 - 後から読み込まれる値には `wait_for` で値の表示条件を指定する（例: `{"css": ".price", "has_text": "円"}`）。座標は3回連続で安定するまで測り直してから撮る。待機上限は `browser.timeout_ms`（既定 30000）、画面・切り抜きごとの `timeout_ms` で変えられる。固定の `wait_ms` は補助として使う
+- SPAは `wait_url` と `wait_for`（ローディングの `hidden`、更新後の値）で表示完了を確認する。条件は撮影前の入力操作後に待つ。無限スクロールは合意済みの代表行を `scroll_until.target` とし、回数・時間の上限を指定する。仮想リストは `capture_mode: "viewport"` で現在の表示を撮り、離れた行はshotを分ける。指定例は [scenario-format.md](references/scenario-format.md) の「SPA・無限スクロール・仮想リスト」を参照
 - iframe 内は `target` に `frame`（セレクタ、入れ子なら外側からの配列）を付ける。赤枠は親ページ上の座標に変換される。画像マップの `area` は対応画像と `coords` から範囲を測る。指定例は scenario-format.md を参照
 - ログイン・CAPTCHA・アクセス制限のある画面は自動化しない（突破を試みない）。その画面は C、保存済みの実行結果があるなら E に切り替える
 - アクセスは資料作成に必要な最小限のページ数にとどめる
