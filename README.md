@@ -60,7 +60,7 @@ python simple-plan-auditor/scripts/render_review.py simple-plan-auditor/examples
 
 ## Scraping Procedure Deck
 
-Webサイトの操作・取得手順を、編集可能な赤枠・番号とデータレイアウト表を備えたPowerPoint資料にする。起点URL、URLの流れ、手持ちのキャプチャ、既存Playwrightコード、Playwrightの実行結果を入力にできる。
+Webサイトの操作・取得手順を、編集可能な赤枠・番号とデータレイアウト表を備えたPowerPoint資料にする。ベストプラクティスは、Claude Cowork のスキルで実際のサイト操作を録画して見せ、その録画を参考に撮影し直すこと。録画で操作の順番・絞り込み条件・開く商品・値の位置が伝わり、撮影し直した画面なので赤枠を正確に付けられる。録画のほか、起点URL、URLの流れ、手持ちのキャプチャ、既存Playwrightコード、Playwrightの実行結果も入力にできる。
 
 撮影前に、対象画面・状態・代表件数・表示差分・再利用範囲・撮影枚数を合意する。コードの全件ループや見つかった表示差分を自動で全て撮影せず、追加は追加分だけ確認する。`--only` による部分撮影では、対象外の撮影結果を保持する。
 

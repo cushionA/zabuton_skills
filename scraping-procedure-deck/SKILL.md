@@ -1,6 +1,6 @@
 ---
 name: scraping-procedure-deck
-description: Webサイトのスクレイピング（クロール）手順を、顧客向けのPowerPoint資料（.pptx）にまとめるスキル。画面キャプチャの上にPowerPointで編集できる赤枠と①②…の番号を重ね、画面遷移スライドでは操作の順番、データ取得スライドでは納品データレイアウトの項目No.に番号を対応させる。右側にデータレイアウト（項目名・型）を並べて画面との対応を示し、画面から取らない項目（クロール日時など）はグレーアウトする。商品ごとの表示の違い（レビューなし・セール表示など）も専用スライドか小さな切り抜きで示せる。既存の提案書などにそのデザインのまま差し込むこともできる。「スクレイピング手順書」「クロール手順をパワポで」「取得仕様の画面説明」「画面キャプチャに赤枠と番号」「データレイアウトと画面の対応」「Playwrightのコードから手順書」「scraping procedure slides」のような依頼で使う。入力は起点URL・URLの流れ・手持ちの画面キャプチャ・既存のPlaywrightコード・PlaywrightのJSON実行レポートと添付PNGのいずれでもよい。
+description: Webサイトのスクレイピング（クロール）手順を、顧客向けのPowerPoint資料（.pptx）にまとめるスキル。画面キャプチャの上にPowerPointで編集できる赤枠と①②…の番号を重ね、画面遷移スライドでは操作の順番、データ取得スライドでは納品データレイアウトの項目No.に番号を対応させる。右側にデータレイアウト（項目名・型）を並べて画面との対応を示し、画面から取らない項目（クロール日時など）はグレーアウトする。商品ごとの表示の違い（レビューなし・セール表示など）も専用スライドか小さな切り抜きで示せる。既存の提案書などにそのデザインのまま差し込むこともできる。「スクレイピング手順書」「クロール手順をパワポで」「取得仕様の画面説明」「画面キャプチャに赤枠と番号」「データレイアウトと画面の対応」「Playwrightのコードから手順書」「scraping procedure slides」のような依頼で使う。入力は、サイト操作の録画（推奨。Claude Cowork のスキルで操作を録画して見せる）、起点URL・URLの流れ・手持ちの画面キャプチャ・既存のPlaywrightコード・PlaywrightのJSON実行レポートと添付PNGのいずれでもよい。
 ---
 
 # Scraping Procedure Deck
@@ -46,6 +46,7 @@ description: Webサイトのスクレイピング（クロール）手順を、�
 
 | パターン | 用意するもの | 赤枠の位置 |
 |---|---|---|
+| F. 操作の録画（推奨） | 操作を実演した録画、データレイアウト | 録画から手順を読み取り、公開ページは再撮影してDOM座標から自動。ログイン画面などはフレームから読み取り |
 | A. 起点URL＋操作シナリオ | 起点URL、操作内容（文章でよい） | DOM座標から自動（正確） |
 | B. URLの流れ | 画面ごとのURL（遷移順）、各画面での操作 | DOM座標から自動（正確） |
 | C. 手持ちの画面キャプチャ | 画像（遷移順）、各画像での操作 | 画像から読み取り（要微調整） |
@@ -53,7 +54,9 @@ description: Webサイトのスクレイピング（クロール）手順を、�
 | E. Playwright の実行結果 | JSONレポートと添付PNG | 保存画像から読み取り（要微調整）。サイトの再操作なし |
 
 - どのパターンでもデータレイアウト（No.・項目名・型・画面から取らない項目）が必要
-- 迷ったら A にする。ログインや CAPTCHA で自動化できない画面だけ C を混ぜる
+- **ベストプラクティスは F**。Claude Cowork のスキルで、利用者が実際のサイト操作を録画して見せる。文章での説明より、操作の順番・絞り込み条件・開く商品・値を読む位置が漏れなく伝わる
+- 録画が無ければ A にする。ログインや CAPTCHA で自動化できない画面だけ C を混ぜる
+- F は録画を手順の「仕様」として読む。録画のフレームは、自動で入れない画面（ログイン・CAPTCHA など）の画像として使うほかは、資料の画像にしない（解像度・マウスカーソル・個人情報の写り込みがあるため）
 - 表示の違いを入れるときは、その表示が出ているページのリンクと、どこが違うか（どう扱うか）をもらう
 - 実行結果を渡されたら E。[実行結果のインポート](references/import-results.md)に従い、成功した実行の添付PNGを一覧化して選ぶ。通常の文字ログ・HTMLレポート・`trace.zip` の直接変換には対応しない
 
@@ -70,7 +73,19 @@ W/preview/        目視確認用のPNG
 
 ### 1. 入力を確認し、撮影範囲を合意する
 
-パターンを決め、受け取ったコード・指示・画像・データレイアウトを読む。データレイアウトが Excel/CSV なら `data_layout` に変換する。サイトを開いたりコードを実行したりする前に、次を撮影案としてまとめ、不足情報と一緒に確認する。確認文の例は inputs.md を参照。
+パターンを決め、受け取った録画・コード・指示・画像・データレイアウトを読む。録画（F）はまず代表フレームに分けて読む。
+
+```
+python -X utf8 S/scripts/video_frames.py <録画> --out W/video_frames
+```
+
+- `W/video_frames/contact_sheet.png`（代表フレームの一覧）と `frames.json`（秒数）ができる。一覧で全体の流れをつかみ、必要なフレームを個別に開く。取り出し足りない時刻は `--at 12.5,30` で追加で取る
+- 読み取るのは、開いた画面・入力した値・絞り込み条件・押した要素・値を指し示した位置。ポップアップや読み込み途中の画面は手順に入れない
+- 音声は読めない。ナレーションで補足している場合は、文字起こしかメモを受け取る。画面だけで判断できない操作は推測せず質問する
+- mp4 などは PATH 上の ffmpeg か `pip install imageio-ffmpeg` が必要（Playwright 同梱の ffmpeg は webm のみ）
+- 録画に個人情報・ログインIDなどが写っていないか確認する。録画とフレームは公開リポジトリにコミットしない
+
+データレイアウトが Excel/CSV なら `data_layout` に変換する。サイトを開いたりコードを実行したりする前に、次を撮影案としてまとめ、不足情報と一緒に確認する。確認文の例は inputs.md を参照。
 
 - 撮る画面と状態、操作の流れ、各画面で示す取得項目
 - 例示する商品・ページと件数、含める表示差分（レビューなし・セール等）
@@ -78,6 +93,8 @@ W/preview/        目視確認用のPNG
 - 今回撮らない画面・表示差分。コード内の全件ループや条件分岐は候補であり、全件の撮影指示とは扱わない
 
 撮影範囲が未確定なら、ユーザーの回答を待つ。回答がないまま撮影を始めない。すでに具体的な対象・表示差分・再利用範囲が指定または合意されていれば、その範囲で進め、同じ確認を繰り返さない。合意内容は作業中の会話または作業メモで参照できるようにする。
+
+F は録画に映った画面・操作だけを撮影案にする。録画にない画面や表示差分は自動で足さず、必要なら追加の録画か指示をもらう。
 
 E は撮影済み画像の利用範囲と順序を合意する。レポートの受領は全添付・全リトライの採用指示ではない。画像が不足してもテストやログインを再実行せず、不足画面を伝える。
 
@@ -87,6 +104,10 @@ E は撮影済み画像の利用範囲と順序を合意する。レポートの
 
 形式は [references/scenario-format.md](references/scenario-format.md)、完成例は [examples/aupay-market.json](examples/aupay-market.json)。
 
+- **F**
+  - 録画から読み取った操作を、A/B と同じ scenario.json の shot と steps に書き起こす。公開ページは Playwright で開き、録画と同じ画面・状態になることを確かめてから `target` を決める。録画の操作を推測で補わない
+  - 録画に合わせて操作しても同じ画面にならない（サイト改修・地域差・ログイン必須など）ときは、その画面だけ録画のフレームを C として使う。ログイン・CAPTCHA は突破を試みない
+  - 録画で選んだ商品・条件をそのまま例示に使う。ループや全件処理は代表1件で例示し、`notes` に繰り返す旨を書く
 - **A/B**
   - Playwright（Python）で対象ページを開き、要素の場所・文言・遷移を確かめてから `target` を決める。推測で書かない
   - 1画面1 shot を基本にする。ドロップダウンを開くなどで状態が変わる場合は、状態ごとに shot を分ける
@@ -104,7 +125,7 @@ E は撮影済み画像の利用範囲と順序を合意する。レポートの
 
 手順文（`text`）は顧客が読む文にする。画面上の文言は「」で囲む。
 
-### 3. 撮影する（A/B/D）
+### 3. 撮影する（A/B/D/F）
 
 `shots` と `peeks` が合意した範囲だけで構成されていることを確認して実行する。既存の scenario に他の画面が残っている場合は `--only` で限定する。選択した shot の `peeks` も撮影されるため、表示差分を全件含めたまま実行しない。`--only` でも対象へ到達するために前段の操作を再現する場合がある。
 
@@ -122,8 +143,8 @@ python S/scripts/capture.py W/scenario.json --out W/captures --only item,item_sa
 ### 4. 生成する
 
 ```
-python S/scripts/build_deck.py W/scenario.json --captures W/captures -o W/out/<名前>.pptx   # A/B/D
-python S/scripts/build_deck.py W/scenario.json -o W/out/<名前>.pptx                       # C
+python S/scripts/build_deck.py W/scenario.json --captures W/captures -o W/out/<名前>.pptx   # A/B/D/F（再撮影する画面）
+python S/scripts/build_deck.py W/scenario.json -o W/out/<名前>.pptx                       # C（Fで全画面がフレーム画像のとき）
 python S/scripts/build_deck.py W/imported/scenario.json -o W/out/<名前>.pptx              # E
 ```
 
@@ -214,7 +235,8 @@ Windows は PowerPoint で、それ以外は LibreOffice で描画する。全�
 
 | パス | 用途 |
 |---|---|
-| `scripts/capture.py` | A/B/D: scenario.json に従ってブラウザを操作し、キャプチャ・赤枠座標・差分の切り抜き（captures/deck.json）を出す |
+| `scripts/video_frames.py` | F: 操作の録画から、画面が切り替わるごとの代表フレームと一覧画像（contact_sheet.png）、秒数（frames.json）を出す。`--at` で指定時刻のフレームも取れる |
+| `scripts/capture.py` | A/B/D/F: scenario.json に従ってブラウザを操作し、キャプチャ・赤枠座標・差分の切り抜き（captures/deck.json）を出す |
 | `scripts/build_deck.py` | scenario（＋撮影結果）から pptx を生成する。既存資料への差し込み、切り出し・枠の間隔・番号の配置・スライド分割・はみ出し検出を行う |
 | `scripts/render_preview.py` | pptx を1枚ずつ PNG にする（PowerPoint または LibreOffice） |
 | `scripts/overlay.py` | C の座標読み取り用の目盛り画像と、枠の確認画像を作る |
@@ -224,4 +246,4 @@ Windows は PowerPoint で、それ以外は LibreOffice で描画する。全�
 | `references/scenario-format.md` | scenario.json の仕様、Playwright コードからの変換表 |
 | `examples/aupay-market.json` | au PAY マーケット（検索 → ショップ絞り込み → 商品詳細、表示の違い2種）の完成例 |
 
-依存: Python 3.10+、`python-pptx`、`Pillow`、`lxml`、`playwright`（A/B/D のみ。`playwright install chromium` が必要）。フォントは Meiryo UI（Windows 標準）を使う。差し込み時は差し込み先のテーマフォントを使う。
+依存: Python 3.10+、`python-pptx`、`Pillow`、`lxml`、`playwright`（A/B/D/F の再撮影のみ。`playwright install chromium` が必要）、ffmpeg（F の録画読み取りのみ）。フォントは Meiryo UI（Windows 標準）を使う。差し込み時は差し込み先のテーマフォントを使う。
