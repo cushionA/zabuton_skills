@@ -2,7 +2,8 @@
 
 ## 対話起動
 
-`agents/openai.yaml` の定義で呼ぶ。stateを持たない単発実行になるため、繰り越しと既報の重複排除は効かない。
+`agents/openai.yaml` の定義で呼ぶ。スキル直下の `--state-dir state` を毎回使い、結果確定後に `scripts/record_run.py report.json --state-dir state` を呼ぶ。
+同じstateを実行間で保持できれば、対話起動でも繰り越しと既報の重複排除が継続する。stateを保持できない環境は探索の下書きだけに使う。
 
 ## 非対話の判断ステップ
 
@@ -17,7 +18,7 @@ RADAR_LLM=codex python scripts/llm.py
 - 最後の引数を `-` にして、指示と判断対象をまとめてstdinで渡す。argvへ入れない。
 - `--ephemeral` `--ignore-user-config` `--skip-git-repo-check` `--sandbox read-only` を既定にする。探索と実行はオーケストレータ側の責任にする。
 - `--output-schema` でJSONスキーマを固定する。使い捨てディレクトリにスキーマを書き、`--cd` をそこへ向ける。
-- 返り値はClaude側と同じ検証を通す。スキーマに合わなければ`None`を返し、候補を保留に倒す。
+- 返り値はClaude側と同じ`jsonschema`検証を通す。出力がスキーマに合わなければ`None`を返す。スキーマ自体の誤りや依存未導入は設定エラーとして止める。
 
 Claude側と違い、指示がargvに載らないので `< > & | ^` の制約は受けない。
 

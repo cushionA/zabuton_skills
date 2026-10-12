@@ -27,15 +27,17 @@
 | `estimated_cpu_minutes` | number | 10 | `max_cpu_minutes_per_candidate`超過で保留。実行時間予算の消費量にもなる |
 | `estimated_gpu_minutes` | number | 10 | `requires_gpu`が`true`のときの所要時間 |
 | `estimated_ram_gb` | number | なし | `max_ram_gb`超過で保留 |
-| `estimated_cost_jpy` | number | 0 | `money_budget_jpy`超過で除外 |
+| `estimated_cost_jpy` | number | 0 | `money_budget_jpy`超過で実行保留。読解・報告対象には残す |
 
 `estimated_*` を埋めないと全候補が一律10分として扱われ、実行時間予算の配分が意味を持たなくなる。モデル容量、必要な依存、公式が示すハードウェア要件から粗くてよいので入れる。
 
 ## 繰り越しで付く値
 
-`--state-dir`を使うと、時間切れの候補が`queue.json`へ保存され次回の入力に自動で戻る。
+`--state-dir`を使うと、実行予定と時間切れの候補が`queue.json`へ保存され、完了記録まで次回の入力に自動で戻る。
 そのとき`carried_over_since`（最初に繰り越した日）と`carry_count`（繰り越し回数）が付く。
-手で書く必要はない。年代による除外は無いので、繰り越しは純粋に「まだ実行できていない」を表す。
+手で書く必要はない。今回再発見してメタデータを更新しても、最初の繰り越し日を引き継ぐ。
+`record_run.py`または`send_email.py`に渡す報告の`recommended`と`completed_ids`に入った候補だけを完了扱いにする。
+`digest`への掲載や実行予定への登録だけではキューから消えない。GPU・RAM・費用などの制約による保留は、同じ制約のまま自動再試行しない。
 
 ## 例
 
@@ -61,11 +63,12 @@
 
 ## 出力
 
-- `counts`: 入力件数と各区分の件数。ダイジェストや実行記録に使う
-- `ranked_candidates`: 採点を通った候補をスコア降順で全件
+- `counts`: 入力件数と各区分の件数。`ranked`は報告対象数、`scheduled`は実行予定数、`queued`は採点時点の未完了候補数（実行予定も含む）。実際に検証した数は実行結果から別途集計する
+- `ranked_candidates`: 採点を通った報告対象をスコア降順で全件。GPU・RAM・費用などで実行を保留した候補も含む
+- `review_pool`: `ranked_candidates`のうち今回読解する候補
 - `scheduled_checks`: そのうち実行時間予算に収まる分。ここまでが今回検証する対象
-- `deferred`: 予算切れ、GPU不可、CPU時間超過、RAM超過。`reason`に理由が入る
-- `rejected`: 対象外。`reason`は`invalid_record` `duplicate` `already_reported` `disabled_or_unknown_source` `not_relevant_or_hot` `cash_budget_exceeded`。
+- `deferred`: 実行時間予算切れ、GPU不可、CPU/GPU時間超過、RAM超過、費用超過。`reason`に理由が入る
+- `rejected`: 対象外。`reason`は`invalid_record` `duplicate` `already_reported` `disabled_or_unknown_source` `not_relevant_or_hot`。
   年代だけを理由にした`rejected`は無い。話題性(`hot_signals`/`trend_rank`)も関心一致も無い候補が`not_relevant_or_hot`になる。
 
 `ranked_candidates`と`deferred`の`id`は重複排除キー（`doi` `arxiv_id` `id` `url` の優先順）に揃えてある。

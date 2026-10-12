@@ -145,9 +145,6 @@ def score(record, profile, today, key, freshness_multiplier=1.0):
     estimated_cost = optional_number(record, "estimated_cost_jpy") or 0
     if estimated_cost < 0:
         raise ValueError("estimated_cost_jpy cannot be negative")
-    if estimated_cost > profile["constraints"]["money_budget_jpy"]:
-        return "rejected", {"id": key, "title": title, "reason": "cash_budget_exceeded"}
-
     requires_gpu = record.get("requires_gpu", False)
     if not isinstance(requires_gpu, bool):
         raise ValueError("requires_gpu must be boolean")
@@ -173,6 +170,9 @@ def score(record, profile, today, key, freshness_multiplier=1.0):
         "requires_gpu": requires_gpu,
         "estimated_check_minutes": estimated_check_minutes,
     }
+    if estimated_cost > profile["constraints"]["money_budget_jpy"]:
+        item["reason"] = "cash_budget_exceeded"
+        return "deferred", item
     if requires_gpu and not profile["constraints"]["gpu"]["enabled"]:
         item["reason"] = "gpu_disabled"
         return "deferred", item
@@ -225,11 +225,20 @@ def main():
     carried = []
     if args.state_dir:
         reported = state.load_seen(args.state_dir)
-        # 今回の探索で再発見された候補は新しいメタデータのほうを使う
+        pending = state.load_queue(args.state_dir, today, profile["constraints"]["max_carry_over_days"])
+        pending_by_key = {state.candidate_key(record): record for record in pending}
+        # 再発見時は内容を更新しても、最初の繰り越し日と回数は引き継ぐ。
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            previous = pending_by_key.get(state.candidate_key(record), {})
+            for field in ("carried_over_since", "carry_count"):
+                if field in previous:
+                    record[field] = previous[field]
         fresh_keys = {state.candidate_key(record) for record in records if isinstance(record, dict)}
         carried = [
             record
-            for record in state.load_queue(args.state_dir, today, profile["constraints"]["max_carry_over_days"])
+            for record in pending
             if state.candidate_key(record) not in fresh_keys
         ]
         records = records + carried
@@ -238,7 +247,7 @@ def main():
         if not isinstance(record, dict):
             rejected.append({"id": f"#{index}", "title": None, "reason": "invalid_record", "detail": "candidate must be an object"})
             continue
-        key = str(record.get("doi") or record.get("arxiv_id") or record.get("id") or record.get("url") or "").casefold()
+        key = state.candidate_key(record)
         if not key:
             rejected.append({"id": f"#{index}", "title": record.get("title"), "reason": "invalid_record", "detail": "needs id, DOI, arXiv ID, or URL"})
             continue
@@ -275,23 +284,25 @@ def main():
             deferred_item["reason"] = "run_time_budget"
             deferred.append(deferred_item)
 
-    # 読解は実行より桁で安い。実行できない候補も含めて広く読む対象を出す。
+    # 報告と読解の候補には実行不可も含める。実行可否は scheduled_checks で区別する。
     review_size = int(profile["exploration"]["review_pool_size"])
-    eligible_ids = {item["id"] for item in eligible}
-    review_pool = sorted(
-        eligible + [item for item in deferred if item["id"] not in eligible_ids and "score" in item],
+    reportable_by_id = {item["id"]: item for item in eligible}
+    reportable_by_id.update({item["id"]: item for item in deferred})
+    ranked_candidates = sorted(
+        reportable_by_id.values(),
         key=lambda item: (-item.get("score", 0), str(item.get("title", "")).casefold()),
-    )[:review_size]
+    )
+    review_pool = ranked_candidates[:review_size]
 
     queued = 0
     if args.state_dir:
-        # 時間切れだけを繰り越す。GPU必須やRAM超過は次回も同じ制約に当たる。
-        carry = [
+        # 予定に入っただけでは完了ではない。実行可能な候補は完了記録まで残す。
+        # GPU・RAM・費用などの制約による保留は、同じ制約では再試行しない。
+        pending = [
             raw_by_key[item["id"]]
-            for item in deferred
-            if item.get("reason") == "run_time_budget" and item["id"] in raw_by_key
+            for item in eligible
         ]
-        queued = state.save_queue(args.state_dir, carry, today)
+        queued = state.save_queue(args.state_dir, pending, today)
 
     output = {
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -305,6 +316,7 @@ def main():
             "input": len(records),
             "carried_in": len(carried),
             "eligible": len(eligible),
+            "ranked": len(ranked_candidates),
             "scheduled": len(scheduled_checks),
             "review_pool": len(review_pool),
             "deferred": len(deferred),
@@ -313,7 +325,7 @@ def main():
             "already_reported": sum(1 for item in rejected if item.get("reason") == "already_reported"),
             "invalid": sum(1 for item in rejected if item.get("reason") == "invalid_record"),
         },
-        "ranked_candidates": eligible,
+        "ranked_candidates": ranked_candidates,
         "review_pool": review_pool,
         "scheduled_checks": scheduled_checks,
         "used_time_budget_minutes": used_minutes,

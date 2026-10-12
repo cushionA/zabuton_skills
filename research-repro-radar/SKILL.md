@@ -10,6 +10,7 @@ description: 話題になっている新しい論文・小型モデル・AI駆�
 ## 実行前に読むもの
 
 - 毎回 [references/profile.json](references/profile.json) を読み、関心、想定ワークロード、時間、費用上限を使う。
+- 初回のLLM判断前に、スキル直下で `python -m pip install -r requirements.txt` を実行してJSON Schema検証の依存を入れる。
 - 対話で実行するときは `--state-dir state`（このスキル直下）を毎回使う。既報の除外と繰り越しが実行間で継続する。
 - 探索するときは [references/sources.md](references/sources.md) を読む。
 - 候補を採点にかけるときは [references/candidate-schema.md](references/candidate-schema.md) を読む。
@@ -23,12 +24,13 @@ description: 話題になっている新しい論文・小型モデル・AI駆�
 2. DOI、arXiv ID、Hugging Face ID、公式リポジトリURLで重複排除する。
 3. [references/candidate-schema.md](references/candidate-schema.md) の形へ正規化し、`scripts/rank_candidates.py`で話題性、関心との近さ、実装の有無、CPU実行性を採点する。`--state-dir`を渡すと既報の除外と繰り越しの再投入が同時に行われる。`estimated_cpu_minutes`を埋めないと全候補が一律10分扱いになり、実行時間予算の配分が崩れる。
 4. まず`review_pool`を上から読む。原文の主張、公式実装の有無、ライセンス、必要リソースを確認し、刺さらないものは理由を言って落とす。読解は実行より桁で安いので、実行できない候補（GPU必須など）もここでは読む。スコアは並べ替えの道具であって判断ではない。公開が古いことは却下理由にしない。
-5. 吟味を通ったものを`scheduled_checks`の順に短く試す。集める段階は件数で打ち切らないが、検証できるのは実行時間予算に収まる分だけで、実際には数件になる。時間切れの候補は`--state-dir`の`queue.json`へ自動で繰り越され、次回の入力に再投入される。非常に話題なら関心語に完全一致しない候補もワイルドカードとして残せる。
+5. 吟味を通ったものを`scheduled_checks`の順に短く試す。集める段階は件数で打ち切らないが、検証できるのは実行時間予算に収まる分だけで、実際には数件になる。実行予定と時間切れの候補は`--state-dir`の`queue.json`に保持され、完了を記録するまで次回の入力に再投入される。途中終了した候補を完了扱いにしない。非常に話題なら関心語に完全一致しない候補もワイルドカードとして残せる。
 6. 報告は2層にする。検証まで到達しなかった候補も、拾ったこと自体は必ず伝える。
    - 詳細報告（`recommended`）: 簡易検証で大きな効果を確認できたものと、根拠を説明できる深掘り候補。件数制限なし。
-   - ダイジェスト（`digest`）: 詳細報告に入らなかった`ranked_candidates`の上位。タイトル、リンク、なぜ拾ったか1行だけ。既定で最大15件。
-7. 対話実行で詳細報告を確定したら、`scripts/record_run.py <recommended.json> --state-dir state` を必ず呼ぶ。
-   既報記録と鮮度実績（`adaptive_freshness`）を同時に記録する。呼び忘れると次回の掘り起こし判定が狂う。
+   - ダイジェスト（`digest`）: 詳細報告に入らなかった`ranked_candidates`の上位。GPU・RAM・費用などで実行を保留した候補も含める。タイトル、リンク、なぜ拾ったか1行だけ。既定で最大15件。
+7. 対話実行の結果を確定したら、詳細報告がゼロでも `scripts/record_run.py <report.json> --state-dir state` を必ず呼ぶ。
+   `report.json`には`recommended`配列と、検証完了または理由を確認して見送った候補の`completed_ids`配列を入れる。詳細報告のIDは自動で完了扱いになる。未検証・中断・時間切れの候補は`completed_ids`に入れない。
+   既報記録と鮮度実績（`adaptive_freshness`）を残し、確定した候補だけをキューから取り除く。メール経路では`send_email.py`が同じ更新を行うため、二重に記録しない。
 8. 詳細報告がゼロでもダイジェストは送る。両方ゼロなら実行記録だけ残し、`--heartbeat-days`の間隔を過ぎているときだけ「該当なし」を送る。沈黙と停止を区別できるようにするため、無音を続けない。
 
 ## 境界
@@ -72,4 +74,4 @@ description: 話題になっている新しい論文・小型モデル・AI駆�
 - なぜ拾ったか（trending順位、関心との一致、公式実装の有無のどれか）
 - 次回に回した理由（時間切れ、GPU必須、RAM超過など`deferred`の`reason`）
 
-末尾に`counts`から「今回見た候補数、検証した数、次回へ回した数」を1行入れる。
+末尾に「今回見た候補数、実際に検証した数、未完了で残った数」を1行入れる。`counts.scheduled`は実行予定数なので実測件数として使わない。`counts.queued`は採点時点の未完了数であり、完了記録後のキュー件数とは異なる。
