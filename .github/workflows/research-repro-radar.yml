@@ -30,6 +30,8 @@ jobs:
   research:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    outputs:
+      report_run_id: ${{ steps.report.outputs.run_id }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -38,6 +40,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: 判断用の依存と今回の報告出力を準備
+        run: |
+          python -m pip install -r research-repro-radar/requirements.txt
+          python - <<'PY'
+          from pathlib import Path
+          for name in ("report.json", "body.md"):
+              (Path("research-repro-radar/ci-state") / name).unlink(missing_ok=True)
+          PY
 
       - name: 今週分の探索・採点・読解確認をClaude Codeで実行
         uses: anthropics/claude-code-action@v1
@@ -60,6 +71,10 @@ jobs:
             - references/quick-check.md のラベル("読解確認"のみ使用可)と
               notability基準に従い、report.json (recommended/digest) と本文 body.md を
               research-repro-radar/ci-state に書き出す。
+            - report.json の run_id は環境変数 RADAR_RUN_ID と一致させる。
+              recommended の published_at を引き継ぎ、完了・明示的見送りは completed_ids に入れる。
+              未着手や中断した候補を completed_ids に入れない。
+              record_run.py は呼ばず、既報・鮮度・キューの完了記録は send ジョブに任せる。
             - 完了したら research-repro-radar/ci-state の変更を
               "chore(radar): update ci-state" のようなメッセージでコミットしてpushする。
               変更が無ければコミットしない。
@@ -68,6 +83,18 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           RADAR_LLM: claude
+          RADAR_RUN_ID: ${{ github.run_id }}:${{ github.run_attempt }}
+
+      - name: 今回の報告が生成されたことを確認
+        id: report
+        env:
+          RADAR_RUN_ID: ${{ github.run_id }}:${{ github.run_attempt }}
+        run: |
+          python research-repro-radar/scripts/send_email.py \
+            research-repro-radar/ci-state/report.json research-repro-radar/ci-state/body.md \
+            --state-dir research-repro-radar/ci-state --heartbeat-days 14 \
+            --expected-run-id "$RADAR_RUN_ID" --dry-run
+          echo "run_id=$RADAR_RUN_ID" >> "$GITHUB_OUTPUT"
 
   # メール送信。SMTP認証情報はこのジョブにだけ渡す。エージェント/Web取得は行わない。
   send:
@@ -102,15 +129,17 @@ jobs:
           RESEARCH_RADAR_SMTP_PASSWORD: ${{ secrets.RESEARCH_RADAR_SMTP_PASSWORD }}
           RESEARCH_RADAR_EMAIL_FROM: ${{ secrets.RESEARCH_RADAR_EMAIL_FROM }}
           RESEARCH_RADAR_EMAIL_TO: ${{ secrets.RESEARCH_RADAR_EMAIL_TO }}
+          # sendだけを再実行する場合も、生成したresearchジョブのIDを引き継ぐ。
+          RADAR_RUN_ID: ${{ needs.research.outputs.report_run_id }}
         run: |
           cd research-repro-radar
-          ARGS="--state-dir ci-state --heartbeat-days 14"
+          ARGS=(--state-dir ci-state --heartbeat-days 14 --expected-run-id "$RADAR_RUN_ID")
           # schedule実行では github.event.inputs は存在しないため空文字になる(エラーにはならない)。
           # 空文字はdry-run扱いにしない = 定期実行では実送信する。
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            ARGS="$ARGS --dry-run"
+            ARGS+=(--dry-run)
           fi
-          python scripts/send_email.py ci-state/report.json ci-state/body.md $ARGS
+          python scripts/send_email.py ci-state/report.json ci-state/body.md "${ARGS[@]}"
 
       - name: 送信状態(mail.json/seen.json)をコミット
         run: |

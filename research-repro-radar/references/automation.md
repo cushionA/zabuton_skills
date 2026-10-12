@@ -2,7 +2,7 @@
 
 ## 組み立て
 
-オーケストレータはPythonに固定し、LLMは差し替え可能な判断ステップとして呼ぶ。
+探索と実行は呼び出し元のエージェントが行い、採点・state更新・送信はPythonスクリプトを使う。LLMの判断ステップは差し替え可能にする。
 
 1. スケジューラ（ローカルのタスクスケジューラ、またはGitHub Actionsのcron）
 2. 探索と正規化 → [candidate-schema.md](candidate-schema.md) の形へ
@@ -18,8 +18,10 @@ RADAR_LLM=claude python scripts/llm.py   # 接続確認
 RADAR_LLM=codex  python scripts/llm.py
 ```
 
-判断対象はすべてstdinで渡し、ツールを使わせず、JSONスキーマに合わない応答は「判断できず」として
-候補を保留に倒す。この検証は両方のバックエンドで共通なので、切り替えても挙動が変わらない。
+初回はスキル直下で `python -m pip install -r requirements.txt` を実行する。
+判断対象はすべてstdinで渡し、JSONスキーマに合わない応答は「判断できず」として候補を保留に倒す。
+Claudeにもスキーマ全文をstdinで渡し、両バックエンドの返り値を`jsonschema`で検証する。
+不正なスキーマや依存未導入は設定エラーとして停止し、弱い検証へ切り替えない。
 プラットフォーム固有の注意は [../platform/claude.md](../platform/claude.md) と
 [../platform/openai.md](../platform/openai.md) を見る。
 
@@ -32,16 +34,20 @@ RADAR_LLM=codex  python scripts/llm.py
 | ファイル | 中身 | 効果 |
 |---|---|---|
 | `seen.json` | 詳細報告した候補のキーと日時 | 次回以降 `already_reported` で除外。365日または2000件で失効 |
-| `queue.json` | 時間切れで検証できなかった候補の元レコード | 次回の入力へ自動で再投入。`max_carry_over_days`を過ぎたら失効 |
+| `queue.json` | 実行予定・時間切れの未完了候補の元レコード | 完了記録まで次回へ再投入。`max_carry_over_days`を過ぎたら失効 |
 | `mail.json` | 送信済み指紋と`last_sent_at` | 詳細報告の二重送信防止と、生存報告の間隔判定 |
 | `freshness.json` | 実行ごとの詳細報告件数と、うち鮮度基準内の件数 | 直近数回が掘り起こしばかりなら鮮度加点を自動でブースト（`adaptive_freshness`） |
 
-- 年代による除外は無いので、繰り越しは純粋に「時間切れでまだ検証できていない」を表す。
-- 繰り越すのは`run_time_budget`で溢れた分だけ。GPU必須やRAM超過は次回も同じ制約に当たるので繰り越さない。
-- ダイジェストで触れただけの候補は既報にしない。まだ検証していないので、キューに残す。
-- 今回の探索で再発見された候補は、キューの古いメタデータより新しい方を使う。
+- 実行予定への登録は完了ではない。`scheduled_checks`と`run_time_budget`で溢れた候補を保持し、途中終了しても次回へ残す。
+- GPU・RAM・費用などの制約による保留は読解・報告対象に残すが、同じ制約のまま自動再試行するキューには入れない。
+- ダイジェストで触れただけの候補は既報・完了扱いにしない。既存の未完了キューも保持する。
+- 今回の探索で再発見された候補は新しいメタデータを使い、最初の繰り越し日と繰り越し回数を引き継ぐ。
 - `send_email.py`は送信成功時に自動で`freshness.json`を更新する。対話実行で報告を確定したときは
-  `scripts/record_run.py`を呼んで同じ記録を残す（`seen.json`と`freshness.json`を1回でまとめて更新する）。
+  `scripts/record_run.py report.json --state-dir state`を呼ぶ。詳細報告がゼロでも実行結果を記録する。
+- 報告の`recommended`のIDと`completed_ids`だけをキューから取り除く。`completed_ids`は、検証完了または理由を確認して見送った候補に限り、未着手・中断・時間切れを含めない。
+- 送信が不要な実行も完了IDと鮮度実績を記録する。`--dry-run`ではstateを書き換えない。対話の`record_run.py`とメールの記録を同じ実行で二重に呼ばない。
+- 公開日不明の候補は鮮度の分母・分子に含めず、判定できる候補がゼロなら鮮度ブーストを保留する。
+- `run_id`がある報告の鮮度記録は同じ実行を二重に数えない。メールではIDが無い場合も送信指紋を使い、送信後のstate更新が中断したら再実行で不足分を記録する。
 
 実行を跨いでstateを保持できることが実行基盤の必須条件。
 実行ごとにファイルシステムが消える基盤では、繰り越しも既報の重複排除も成立しない。
@@ -49,7 +55,7 @@ RADAR_LLM=codex  python scripts/llm.py
 
 ## GitHub Actions
 
-`.github/workflows/research-repro-radar.yml`（リポジトリ直下）で実装済み。週1回のcronと手動実行に対応する。
+`.github/workflows/research-repro-radar.yml`（リポジトリ直下）で実装済み。現在は対話実行主体のためcronをコメントアウトしており、手動実行のみ有効。週次再開の指示があった場合にcronを戻す。
 
 公開リポジトリの標準runnerは無料。非公開リポジトリはプランの無料枠を消費するため、支出上限を0にし、探索は週1回から始める。
 
@@ -60,14 +66,15 @@ RADAR_LLM=codex  python scripts/llm.py
   論文・READMEなど信用できない外部データをWebSearch/WebFetchで読むジョブなので、
   SMTP認証情報はこのジョブに渡さない。同じ理由で、候補の公式コードを実行する
   簡易確認/比較済みレベルの検証はここでは行わず、読解確認レベルに留める。
-  `research-repro-radar/ci-state`へ`report.json`と`body.md`を書き出し、コミットしてpushする。
+  依存をインストールし、前回の報告ファイルを消してから`research-repro-radar/ci-state`へ`report.json`と`body.md`を書き出し、コミットしてpushする。
+  `report.json`の`run_id`を環境変数`RADAR_RUN_ID`と一致させる。`completed_ids`も出力し、stateの完了記録は`send`ジョブに任せる。
 - `send`ジョブ: `research`の後に実行。`scripts/send_email.py`を直接呼ぶだけで、
-  エージェントもWeb取得も行わない。SMTP認証情報はこのジョブにだけ渡す。
+  エージェントもWeb取得も行わない。`research`の出力IDを`--expected-run-id`へ渡し、報告のIDが不一致なら送信しない。`send`だけの再実行でも元の報告IDを引き継ぐ。SMTP認証情報はこのジョブにだけ渡す。
 
 必要なSecrets: `CLAUDE_CODE_OAUTH_TOKEN`、`RESEARCH_RADAR_SMTP_HOST`、`RESEARCH_RADAR_SMTP_PORT`、
 `RESEARCH_RADAR_SMTP_USERNAME`、`RESEARCH_RADAR_SMTP_PASSWORD`、`RESEARCH_RADAR_EMAIL_TO`
-（`RESEARCH_RADAR_EMAIL_FROM`は任意）。初回は`workflow_dispatch`の`dry_run`を`true`にして手動実行し、
-`report.json`と`body.md`の内容を確認してから週次cronに任せる。
+（`RESEARCH_RADAR_EMAIL_FROM`は任意。未設定・空文字ならSMTPユーザー名を使う）。初回は`workflow_dispatch`の`dry_run`を`true`にして手動実行し、
+`report.json`と`body.md`の内容を確認する。
 
 - 権限は`contents: write`（`ci-state`のコミットに使う）。
 - 同時実行は1にする（`concurrency`で設定済み）。
@@ -95,10 +102,13 @@ kaggle kernels output <owner>/<kernel-slug> -p <output-directory> --file-pattern
 python scripts/send_email.py report.json report.md --state-dir state --heartbeat-days 14
 ```
 
-`report.json`は次の2つの配列を持つ。
+`report.json`は次の配列を持つ。
 
-- `recommended`: 詳細報告。各項目に`id`、`title`と、`large_effect`または`deep_dive_value`の`category`
+- `recommended`: 詳細報告。各項目に`id`、`title`と、`large_effect`または`deep_dive_value`の`category`。鮮度判定用に`published_at`も引き継ぎ、不明なら`null`
 - `digest`: ダイジェスト。各項目に`id`、`title`。検証まで到達しなかった上位候補
+- `completed_ids`: 任意の文字列配列。詳細報告に入らなかった候補の検証完了・明示的な見送りを記録する。`recommended`のIDは自動で完了扱いになる
+
+CIでは`run_id`も必須にし、`RADAR_RUN_ID`（GitHub実行IDと実行回数）をそのまま保存する。
 
 送信の判定は`send_email.py`が行う。
 

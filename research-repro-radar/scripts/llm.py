@@ -7,18 +7,18 @@ import state
 import subprocess
 import tempfile
 
+try:
+    import jsonschema
+except ImportError as exc:
+    raise ImportError(
+        "research-repro-radar requires jsonschema; install it with "
+        "python -m pip install -r research-repro-radar/requirements.txt"
+    ) from exc
+
 TIMEOUT_SEC = 180
 # claude の --system-prompt は argv に載る。Windows では claude.CMD 経由で cmd.exe が
 # 引数を再解釈するため、改行と < > & | ^ を含めるとコマンドラインがそこで壊れる。
 UNSAFE_ARGV = re.compile(r"[<>&|^\r\n]+")
-JSON_TYPES = {
-    "boolean": bool,
-    "string": str,
-    "number": (int, float),
-    "integer": int,
-    "array": list,
-    "object": dict,
-}
 
 
 def claude_path():
@@ -59,11 +59,6 @@ def _flatten(text):
     return UNSAFE_ARGV.sub(" ", text).strip()
 
 
-def _shape(schema):
-    properties = schema.get("properties", {})
-    return json.dumps({key: value.get("type", "string") for key, value in properties.items()}, ensure_ascii=False)
-
-
 def _extract_json(text):
     text = text.strip()
     fence = re.search(r"```(?:json)?\s*(.+?)\s*```", text, re.DOTALL)
@@ -79,37 +74,32 @@ def _extract_json(text):
 
 
 def _valid(verdict, schema):
-    if not isinstance(verdict, dict):
+    try:
+        jsonschema.validate(instance=verdict, schema=schema)
+    except jsonschema.ValidationError:
         return False
-    for key in schema.get("required", []):
-        if key not in verdict:
-            return False
-    for key, spec in schema.get("properties", {}).items():
-        if key not in verdict:
-            continue
-        expected = JSON_TYPES.get(spec.get("type"))
-        if expected is None:
-            continue
-        if expected is bool:
-            if type(verdict[key]) is not bool:
-                return False
-        elif isinstance(verdict[key], bool) or not isinstance(verdict[key], expected):
-            return False
-    return True
+    return isinstance(verdict, dict)
 
 
 def _judge_claude(instruction, payload, schema, model, timeout):
     claude = claude_path()
     if claude is None:
         return None
-    system_prompt = _flatten(instruction) + " 出力は次の形のJSONオブジェクト1個のみ。前置きも説明も書かないこと: " + _flatten(_shape(schema))
+    system_prompt = _flatten(instruction) + (
+        " 入力JSONのjudgment_inputを判断し、output_schemaの完全なJSON Schemaに従って"
+        "JSONオブジェクト1個のみを返すこと。前置きも説明も書かないこと。"
+    )
+    # schemaにも記号や改行を含められるため、argvへ載せず全文をstdinで渡す。
+    stdin_payload = json.dumps(
+        {"output_schema": schema, "judgment_input": payload}, ensure_ascii=False
+    )
     command = [claude, "-p", "--tools", "", "--system-prompt", system_prompt, "--output-format", "json"]
     if model:
         command.extend(["--model", model])
     try:
         result = subprocess.run(
             command,
-            input=payload,
+            input=stdin_payload,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -174,6 +164,13 @@ def _judge_codex(instruction, payload, schema, model, timeout):
 
 
 def judge(instruction, payload, schema, model=None, timeout=TIMEOUT_SEC):
+    """Return a schema-valid object, or None for an unavailable/invalid verdict.
+
+    Invalid caller schemas raise jsonschema.SchemaError before any LLM is run.
+    """
+    if not isinstance(schema, (dict, bool)):
+        raise jsonschema.SchemaError("schema must be a JSON object or boolean")
+    jsonschema.validators.validator_for(schema).check_schema(schema)
     name = backend()
     if name == "claude":
         verdict = _judge_claude(instruction, payload, schema, model, timeout)
