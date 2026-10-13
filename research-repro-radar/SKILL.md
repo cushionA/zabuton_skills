@@ -20,6 +20,7 @@ description: 話題になっている新しい論文・小型モデル・AI駆�
 
 ## 基本フロー
 
+0. 大量探索・採点・state更新の前に、同じbackend・同じmodelで `scripts/llm.py --model <指定モデル>` の最小接続確認を1回行う。非0なら通常ループへ進まず「判定基盤が利用できなかった」と報告する。既存stateを変更せず、候補を不採用・完了扱いにしない。原因調査の再試行も有限回とし、別backend・別modelへ無断で切り替えない。コマンド型の呼び出し元は `scripts/run_checked.py --model <指定モデル> -- <探索開始コマンド>` でゲートする。
 1. 公開日を問わず、今話題性がある候補を件数で打ち切らずに集める。何年前の論文・モデルでも今trendingなら対象にする。Hugging Face Papersのtrendingを最優先にし、MDPI、OpenReview、arXiv、GitHubを補助にする。trending上位数件だけを取って終わりにしない。`exploration.min_candidates_gathered`を下回るなら、検索クエリとソースを増やして集め直す。
 2. DOI、arXiv ID、Hugging Face ID、公式リポジトリURLで重複排除する。
 3. [references/candidate-schema.md](references/candidate-schema.md) の形へ正規化し、`scripts/rank_candidates.py`で話題性、関心との近さ、実装の有無、CPU実行性を採点する。`--state-dir`を渡すと既報の除外と繰り越しの再投入が同時に行われる。`estimated_cpu_minutes`を埋めないと全候補が一律10分扱いになり、実行時間予算の配分が崩れる。

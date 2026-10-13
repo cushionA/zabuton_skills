@@ -13,12 +13,22 @@
 RADAR_LLM=codex python scripts/llm.py
 ```
 
-実装済みの扱いは次のとおり。`codex-cli-headless` スキルの内容に従っている。
+接続確認はスキーマ準拠かつ `{"ok": true, "note": "ready"}` の応答を確認した場合だけexit 0、失敗はexit 1。大量探索・採点の前に1回実行し、非0なら中止する。モデル名の存在とその環境での利用権は別であり、指定名をそのまま確認し、フォールバックしない。
+
+実装済みの扱いは次のとおり。
 
 - 最後の引数を `-` にして、指示と判断対象をまとめてstdinで渡す。argvへ入れない。
 - `--ephemeral` `--ignore-user-config` `--skip-git-repo-check` `--sandbox read-only` を既定にする。探索と実行はオーケストレータ側の責任にする。
+- 選択した実行ファイルの `--version` と `exec --help` を確認する。必要な既存フラグがhelpに無ければ未対応として停止し、権限関連フラグを落とさない。
+- helpが対応を示した場合だけ `--output-last-message` を使い最終応答ファイルを読む。非対応の場合は通常execのstdout（最終応答）を厳密にJSON解析する。`--json`のJSONLイベント列をstdout全体のJSONとして解析しない。
 - `--output-schema` でJSONスキーマを固定する。使い捨てディレクトリにスキーマを書き、`--cd` をそこへ向ける。
 - 返り値はClaude側と同じ`jsonschema`検証を通す。出力がスキーマに合わなければ`None`を返す。スキーマ自体の誤りや依存未導入は設定エラーとして止める。
+
+`judge()` の dict/None 契約は維持する。原因が必要なら `judge_with_diagnostics()`（verdictとdiagnostics）を使う。失敗段階、子終了コード、所要時間、CLIバージョン、実行ファイル識別ハッシュ、stdout/stderrの長さ・ハッシュ・許可済みエラー種別を記録する。任意の生テキスト、入力、環境変数、認証ファイル、個人パスは出力しない。public診断は原因の手がかりでありread-only/appserverの根本原因を断定しない。version警告とexec失敗はprocessesで別に保持する。タイムアウトはversion/help/exec全体の期限で、内部再試行なし。
+
+この環境にCodex CLIが無い、またはwrapperが子プロセス起動に対応しない場合は、既存認証のある対応環境でhelp→最小probe→保存済み資料1件の実候補schema判定を行う。認証移設・APIキー追加・sandbox解除で迂回しない。
+
+公式仕様: https://developers.openai.com/codex/cli/reference
 
 Claude側と違い、指示がargvに載らないので `< > & | ^` の制約は受けない。
 

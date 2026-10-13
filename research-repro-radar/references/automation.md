@@ -4,6 +4,7 @@
 
 探索と実行は呼び出し元のエージェントが行い、採点・state更新・送信はPythonスクリプトを使う。LLMの判断ステップは差し替え可能にする。
 
+0. 同一backend/modelの接続確認を大量探索・採点より前に1回行う。`llm.py`のexit 0のみ続行条件とする。非0は「判定基盤利用不可」として通常ループを止め、state・未完了キューを変更しない。候補なしの生存報告や完了IDの記録に置き換えない。コマンド起動は `run_checked.py --model <指定モデル> -- <探索開始コマンド>` を使う。自動再試行なし。
 1. スケジューラ（ローカルのタスクスケジューラ、またはGitHub Actionsのcron）
 2. 探索と正規化 → [candidate-schema.md](candidate-schema.md) の形へ
 3. `scripts/rank_candidates.py` で採点と実行時間予算の割り当て（既報の除外と繰り越しの再投入もここ）
