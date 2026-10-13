@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "candidate_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "test",
+        "defer",
+        "reject"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source_url": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quote": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "source_url",
+          "quote"
+        ]
+      }
+    },
+    "verification_level": {
+      "type": "string",
+      "enum": [
+        "unreviewed",
+        "reading",
+        "smoke",
+        "compared"
+      ]
+    },
+    "recommended_category": {
+      "enum": [
+        null,
+        "deep_dive_value",
+        "large_effect"
+      ]
+    },
+    "next_check": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "unconfirmed": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "required": [
+    "candidate_id",
+    "decision",
+    "reason",
+    "evidence",
+    "verification_level",
+    "recommended_category",
+    "next_check",
+    "unconfirmed"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "const": "test"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "next_check": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "recommended_category": {
+            "const": "large_effect"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "verification_level": {
+            "const": "compared"
+          },
+          "evidence": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "recommended_category": {
+            "const": "deep_dive_value"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "verification_level": {
+            "enum": [
+              "reading",
+              "smoke",
+              "compared"
+            ]
+          },
+          "evidence": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ]
+}

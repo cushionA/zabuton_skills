@@ -40,10 +40,10 @@ def codex_path():
 
 def backend():
     name = os.environ.get("RADAR_LLM", "").strip().casefold()
-    if name in ("claude", "codex"):
+    if name in ("claude", "codex", "native"):
         return name
     if name:
-        raise ValueError("RADAR_LLM must be 'claude' or 'codex'")
+        raise ValueError("RADAR_LLM must be 'claude', 'codex' or 'native'")
     if claude_path():
         return "claude"
     if codex_path():
@@ -274,7 +274,7 @@ def _judge_codex(instruction, payload, schema, model, timeout, diagnostics=None)
         diag["elapsed_sec"] = round(time.monotonic() - started, 3)
 
 
-def judge(instruction, payload, schema, model=None, timeout=TIMEOUT_SEC, diagnostics=None):
+def judge(instruction, payload, schema, model=None, timeout=TIMEOUT_SEC, diagnostics=None, *, native_request=None, native_response=None):
     """Return a schema-valid object, or None for an unavailable/invalid verdict.
 
     Invalid caller schemas raise jsonschema.SchemaError before any LLM is run.
@@ -292,6 +292,32 @@ def judge(instruction, payload, schema, model=None, timeout=TIMEOUT_SEC, diagnos
         raise
     if diagnostics is not None:
         diagnostics["backend"] = name
+    if name == "native":
+        # Native agents are spawned by the host orchestrator, never by Python.
+        # Consume only the response for this exact prepared task; no CLI fallback.
+        import native_judge
+        if model is not None:
+            if diagnostics is not None:
+                diagnostics.update(stage="native_validation", failure="native_model_selection_external")
+            return None
+        if not isinstance(native_request, dict):
+            if diagnostics is not None:
+                diagnostics.update(stage="native_validation", failure="native_request_required")
+            return None
+        try:
+            actual_task = {key: native_request.get(key) for key in ("instruction", "payload", "schema")}
+            expected_task = {"instruction": instruction, "payload": payload, "schema": schema}
+            same_task = native_judge._canonical(actual_task) == native_judge._canonical(expected_task)
+        except (TypeError, ValueError, UnicodeError, RecursionError):
+            same_task = False
+        if not same_task:
+            if diagnostics is not None:
+                diagnostics.update(stage="native_validation", failure="native_task_mismatch")
+            return None
+        result = native_judge.validate_response(native_request, native_response)
+        if diagnostics is not None:
+            diagnostics.update(result["diagnostics"])
+        return result["verdict"]
     if name == "claude":
         verdict = _judge_claude(instruction, payload, schema, model, timeout)
     else:
@@ -308,9 +334,9 @@ def judge(instruction, payload, schema, model=None, timeout=TIMEOUT_SEC, diagnos
     return verdict
 
 
-def judge_with_diagnostics(instruction, payload, schema, model=None, timeout=TIMEOUT_SEC):
+def judge_with_diagnostics(instruction, payload, schema, model=None, timeout=TIMEOUT_SEC, *, native_request=None, native_response=None):
     diagnostics = {}
-    verdict = judge(instruction, payload, schema, model, timeout, diagnostics=diagnostics)
+    verdict = judge(instruction, payload, schema, model, timeout, diagnostics=diagnostics, native_request=native_request, native_response=native_response)
     return {"verdict": verdict, "diagnostics": diagnostics}
 
 

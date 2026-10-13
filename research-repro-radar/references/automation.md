@@ -4,15 +4,14 @@
 
 探索と実行は呼び出し元のエージェントが行い、採点・state更新・送信はPythonスクリプトを使う。LLMの判断ステップは差し替え可能にする。
 
-0. 同一backend/modelの接続確認を大量探索・採点より前に1回行う。`llm.py`のexit 0のみ続行条件とする。非0は「判定基盤利用不可」として通常ループを止め、state・未完了キューを変更しない。候補なしの生存報告や完了IDの記録に置き換えない。コマンド起動は `run_checked.py --model <指定モデル> -- <探索開始コマンド>` を使う。自動再試行なし。
+0. 大量探索・採点より前に選択した判定経路のprobeを1回行う。nativeでは `native_judge.py prepare --purpose probe` → ネイティブサブエージェント → `validate` のexit 0を続行条件にする。CLIは `llm.py` のexit 0を条件にする。失敗は「判定基盤利用不可」として通常ループを止め、state・未完了キューを変更しない。候補なしの生存報告や完了IDの記録に置き換えない。CLI経路のコマンド起動は `run_checked.py` でゲートする。nativeではCLIゲートを呼ばない。自動再試行なし。
 1. スケジューラ（ローカルのタスクスケジューラ、またはGitHub Actionsのcron）
 2. 探索と正規化 → [candidate-schema.md](candidate-schema.md) の形へ
 3. `scripts/rank_candidates.py` で採点と実行時間予算の割り当て（既報の除外と繰り越しの再投入もここ）
-4. LLM判断ステップ（原文確認、簡易検証の解釈、報告文の作成）→ `scripts/llm.py`
+4. LLM判断ステップ（原文確認、簡易検証の解釈、報告文の作成）→ nativeは `scripts/native_judge.py`、CLIは `scripts/llm.py`
 5. `scripts/send_email.py` でメール送信とstate更新
 
-LLMをどう呼ぶかだけがプラットフォームで変わる。`scripts/llm.py` の `judge()` が唯一の接点で、
-`RADAR_LLM` 環境変数で `claude` と `codex` を切り替える。未設定ならPATHにある方を使う。
+LLMをどう呼ぶかだけがプラットフォームで変わる。`RADAR_LLM` で `native` / `claude` / `codex` を明示する。nativeは [../platform/native.md](../platform/native.md) に従い、ホストのサブエージェントへ渡す。Python単独やGitHub Actionsだけではホストのサブエージェントを呼べない。CLI用の既存judge()は維持するが、nativeでは準備済み要求・受領済み応答を渡す2段階処理にする。
 
 ```text
 RADAR_LLM=claude python scripts/llm.py   # 接続確認
@@ -20,8 +19,8 @@ RADAR_LLM=codex  python scripts/llm.py
 ```
 
 初回はスキル直下で `python -m pip install -r requirements.txt` を実行する。
-判断対象はすべてstdinで渡し、JSONスキーマに合わない応答は「判断できず」として候補を保留に倒す。
-Claudeにもスキーマ全文をstdinで渡し、両バックエンドの返り値を`jsonschema`で検証する。
+判断対象はCLIではstdin、nativeでは要求JSONへ保存して渡し、JSONスキーマに合わない応答は「判断できず」として候補を保留に倒す。
+Claudeにもスキーマ全文をstdinで渡し、全経路の返り値を`jsonschema`で検証する。
 不正なスキーマや依存未導入は設定エラーとして停止し、弱い検証へ切り替えない。
 プラットフォーム固有の注意は [../platform/claude.md](../platform/claude.md) と
 [../platform/openai.md](../platform/openai.md) を見る。

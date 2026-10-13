@@ -5,7 +5,13 @@
 `agents/openai.yaml` の定義で呼ぶ。スキル直下の `--state-dir state` を毎回使い、結果確定後に `scripts/record_run.py report.json --state-dir state` を呼ぶ。
 同じstateを実行間で保持できれば、対話起動でも繰り越しと既報の重複排除が継続する。stateを保持できない環境は探索の下書きだけに使う。
 
-## 非対話の判断ステップ
+## ネイティブサブエージェントによる判断
+
+ChatGPT WorkやScheduled taskでホストのネイティブサブエージェントが使える場合は、明示的に `RADAR_LLM=native` を選び [native.md](native.md) の要求→サブエージェント→Schema検証を使う。親の実行環境が提供するエージェント機能を使い、子Codex CLIを起動しない。CLIの失敗から自動で切り替える経路ではない。
+
+読み取り専用 `CODEX_HOME` で子CLIが起動できない環境にも適用できる。`--ephemeral` はCLIの初期化書込みをなくさない。認証・権限の変更なしで、このホスト経路自体をprobeと保存済み資料1件で検証する。
+
+## CLIによる非対話の判断ステップ
 
 `scripts/llm.py` の `judge()` が呼ぶ。`RADAR_LLM=codex` で明示するか、PATHに`codex`だけがあれば自動で選ばれる。
 
@@ -37,9 +43,10 @@ ChatGPTのサブスクリプションの枠で動く場合は追加の現金支�
 ## 定期実行
 
 ChatGPTのScheduled taskは実行ごとにファイルシステムが残らない。
-**stateを持てないため、これ単独では繰り越しと既報の重複排除が成立しない。**
+**ローカルstateだけでは繰り越しと既報の重複排除が成立しない。実行前に正規の永続保存先から復元し、今回も同じ `--state-dir` を使う。**
 
-- 探索の下書きだけをScheduled taskに任せ、採点・検証・state更新・メールは`--state-dir`を持てる側で行う
+- 正規stateを外部保存先から復元でき、ネイティブサブエージェントが使えるScheduled taskでは `native` を選ぶ。判定のprobe失敗なら探索・採点・state更新へ進まない
+- 正規stateを復元できない場合は、探索の下書きだけをScheduled taskに任せ、採点・検証・state更新・メールは `--state-dir` を保持できる側で行う
 - または、Windowsのタスクスケジューラか GitHub Actions からオーケストレータを起動し、
   判断ステップだけ `codex exec` に投げる（推奨。Claude側と同じ構成になる）
 
