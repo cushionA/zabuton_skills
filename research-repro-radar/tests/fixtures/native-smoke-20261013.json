@@ -1,0 +1,83 @@
+{
+  "date": "2026-10-13",
+  "backend": "native",
+  "host_runtime": "ChatGPT Work native collaboration",
+  "actual_model_id": "unknown (host default; not gpt-6-luna verified)",
+  "tests_passed": 74,
+  "probe": {
+    "host_agent_task": "/root/native_probe",
+    "validation": "pass",
+    "envelope": {
+      "request_id": "97d182f8-71d5-4c20-9cf9-0add56e14cf2",
+      "task_sha256": "9783d15e810baeba3639e873bf561db9fcf5936782b05227f9ccab78fd1592c4",
+      "verdict": {
+        "ok": true,
+        "note": "ready"
+      }
+    },
+    "request_file_sha256": "e1eb267225c0739d843a8b7e36dcd5d15989d6c6cf260f1d2f4996c437bb950d",
+    "response_file_sha256": "d541a94ab0dc81c3ff5a3e215edecac450141ba69b70cb631d0d76b89fb4b6db",
+    "request_created_at_utc": "2026-10-13T13:45:26.336328+00:00",
+    "response_saved_at_utc": "2026-10-13T13:45:56.968531+00:00",
+    "elapsed_request_to_response_sec": 30.632,
+    "time_basis": "file timestamps; host task recorded separately"
+  },
+  "saved_candidate": {
+    "host_agent_task": "/root/native_candidate",
+    "candidate_id": "github:krlabsorg/squeez",
+    "source_url": "https://github.com/KRLabsOrg/squeez",
+    "snapshot_date": "2026-10-12",
+    "source_sha256": "b9ad48a4cec8f96f6c606b22badca5a0c1b3c3b3af882e57882c0a93db7f1af8",
+    "validation": "pass",
+    "quotes_match_snapshot": true,
+    "envelope": {
+      "request_id": "d0f2f114-bb4d-41c2-abbf-c103798b6006",
+      "task_sha256": "6a1cdf3951bce7ae4368ec6fc0ef07a877c25a12bac0882bde0a2964fcd427a0",
+      "verdict": {
+        "candidate_id": "github:krlabsorg/squeez",
+        "decision": "defer",
+        "reason": "2026-10-12のREADME snapshotを読んだ段階。雑で不揃いなツール出力をタスクに応じて間引く設計は、構造化抽出とコーディングエージェントの関心に合う。150M ModernBERTの抽出型は、大量のスクレイピングデータを低コストで処理するワークロードにも試す価値がありそう。ただしスクレイピングへの転用は推測で、学習対象のツール出力とは分布が違う。候補推論は0回で、CPU対応、総ダウンロード量、RAM、スループット、情報の取りこぼしが未確認。2GB・8GB・20 CPU分の枠内で短い検証を成立させる資源条件がまだ足りないため保留する。READMEの品質・圧縮率は著者の報告であり、独立した実測ではない。深掘り基準の独立した話題性シグナル2件も確認できず、推薦カテゴリは付けない。",
+        "evidence": [
+          {
+            "source_url": "https://github.com/KRLabsOrg/squeez",
+            "quote": "Tool output pruner for LLM coding agents"
+          },
+          {
+            "source_url": "https://github.com/KRLabsOrg/squeez",
+            "quote": "is a 150M ModernBERT span model"
+          }
+        ],
+        "verification_level": "reading",
+        "recommended_category": null,
+        "next_check": "抽出型のモデルカードと配布ファイルでCPU対応・依存関係・総ダウンロード量を確認し、2GBと8GBの制約内なら20 CPU分以内の小規模比較へ進める。固定した雑なスクレイピング入力とツール出力で、単純な行フィルタとの情報保持率・圧縮率・処理件数/秒・ピークRAMを測る。常駐と起動込みを分け、profileのAPI基準線とクラウド単価を使う際はその価格の基準日を明示し、本番判断の前に再確認する。",
+        "unconfirmed": [
+          "150M抽出型のCPU推論対応、配布ファイルと依存関係を含む総ダウンロード量、ピークRAM",
+          "CPUでのスループット、常駐時とコールドスタート時の処理時間、バッチ対応",
+          "150M抽出型の品質と2B生成型との比較値。参照先モデルカードは今回の資料に含まれていない",
+          "雑なスクレイピング入力での情報保持率、構造化抽出への効果、重要行の取りこぼし",
+          "READMEの報告値の再現性、評価指標の集計方法、独立した話題性シグナル2件",
+          "現在のAPI価格とクラウド単価、実測スループットに基づく総費用。profileの参考価格は今回再確認していない",
+          "2026-10-12以降の更新や後継モデル"
+        ]
+      }
+    },
+    "request_file_sha256": "4a4ecddad89509f33b1c66107de709c2dea7d5783f7be7ce1a1f4d06ab2919cb",
+    "response_file_sha256": "5512a265b4239ddec32d023196ffb467c7a88b613ac70a4f416f9783525eb93c",
+    "request_created_at_utc": "2026-10-13T13:46:27.765980+00:00",
+    "response_saved_at_utc": "2026-10-13T13:47:36.616716+00:00",
+    "elapsed_request_to_response_sec": 68.851,
+    "time_basis": "file timestamps; host task recorded separately"
+  },
+  "candidate_inference_runs": 0,
+  "canonical_pending": 1057,
+  "canonical_state_sha256": {
+    "seen.json": "1860499a66ddf6f6a2b71d84a3abef1364bebeb56a22d20a654bdf6bfd2ecbd1",
+    "mail.json": "857c7786769a9a4e2d5ce0389316bd399a40d81fbe2a23122764fe09418550a3",
+    "freshness.json": "0d4cc90d93d8ae711473f77319ab51113b49e37b50d4b3c7876731f8641bf52f",
+    "queue.json": "b25c870634a2488bac0486907dd1a844dd5eefed4ef1529f60f2e477b5ec312a"
+  },
+  "canonical_state_modified": false,
+  "execution_side_copy_updated": false,
+  "cli_restored": false,
+  "independent_review": "passed; taskidentity and schema reference regressions fixed"
+}
