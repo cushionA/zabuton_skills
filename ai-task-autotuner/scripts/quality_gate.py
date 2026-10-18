@@ -189,9 +189,18 @@ def main():
         _clock(a.ws, "resume", "user accepted REVIEW")
         print("REVIEW accepted and recorded; time-limit clock resumed")
         return
+    old = read_json(path)
     gate = evaluate(a.ws)
+    if old and old.get("waiver") and gate["status"] == "REVIEW":
+        blocking = {f["id"] for f in gate["findings"] if not f.get("known") and f["severity"] in ("critical", "high")}
+        old_blocking = {f["id"] for f in old["findings"] if not f.get("known") and f["severity"] in ("critical", "high")}
+        if blocking <= old_blocking:
+            gate["waiver"] = dict(old["waiver"], carried_over=now_iso())
+            print("REVIEW findings unchanged: the user's earlier acceptance still applies")
     write_json(path, gate)
-    if gate["status"] in ("REVIEW", "STOP"):
+    if gate["status"] == "REVIEW" and gate.get("waiver"):
+        _clock(a.ws, "resume", "gate re-run; acceptance carried over")
+    elif gate["status"] in ("REVIEW", "STOP"):
         _clock(a.ws, "pause", f"gate {gate['status']}: waiting for the user")
     elif gate["status"] == "PASS":
         _clock(a.ws, "resume", "gate PASS")

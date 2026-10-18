@@ -178,6 +178,7 @@ def _summarize(units, rows, calls, score, wall_s, concurrency):
         "cost_usd": cost if calls else 0.0, "cost_complete": cost_complete,
         "cost_usd_per_unit": (cost / n) if n else None,
         "cost_uncached_list_usd": uncached if calls else 0.0,
+        "cost_uncached_list_usd_per_unit": ((uncached if calls else 0.0) / n) if (n and uncached is not None) else None,
         "api_ms": {"p50": percentile(api_ms, .5), "p90": percentile(api_ms, .9), "max": max(api_ms) if api_ms else None},
         "api_ms_per_unit": (sum(api_ms) / n) if (api_ms and n) else None,
         "unit_wall_ms": {"p50": percentile(unit_wall, .5), "p90": percentile(unit_wall, .9),
@@ -260,9 +261,13 @@ def run(ws, candidate, split, purpose, exp=None, limit=None, concurrency=None, t
             sys.exit(f"REFUSED: {candidate} changed after run {prior['run_id']}; copy it to a new candidate "
                      "(candidates are immutable once measured so every result stays reproducible)")
     if purpose == "holdout":
-        n_hold = sum(1 for r in list_runs(ws) if r.get("purpose") == "holdout")
+        prior = list_runs(ws)
+        # zero-call (code-only) candidates do not count: knowing what code alone achieves on
+        # holdout is worth one peek and cannot overfit a prompt
+        n_hold = sum(1 for r in prior if r.get("purpose") == "holdout" and not r["_summary"].get("ai_free"))
+        code_only = any(r.get("candidate") == candidate and r["_summary"].get("ai_free") for r in prior)
         cap = ch.get("loop", {}).get("max_holdout_evals", 3)
-        if n_hold >= cap:
+        if n_hold >= cap and not code_only:
             sys.exit(f"REFUSED: holdout already evaluated {n_hold} times (cap {cap}); more peeks turn it into a dev set")
 
     config = dict(ch.get("backend", {}))

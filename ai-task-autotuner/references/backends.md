@@ -17,9 +17,11 @@ Measured on 2026-10-18 (Claude Code 2.1.302, Haiku 5.5), expect drift - re-run
 - Wall time per call = process start (~1-4 s, more under parallel load) + API time. Use
   `api_ms` (`duration_api_ms`) as the API-equivalent latency; `wall_ms` is what this harness
   costs. Report both, labeled.
-- Nearly all input is booked as cache writes/reads by the CLI. `cost_usd` is the CLI-reported
-  list-price cost under that caching. `summary.cost_uncached_list_usd` re-prices every
-  input-side token at the base input price as a backend-neutral comparison point.
+- Nearly all input is booked as cache writes/reads by the CLI, and it caches the whole prompt,
+  not just the static prefix: an identical rerun was ~6x cheaper than the cold run (and faster).
+  `cost_usd` is the CLI-reported list-price cost under that caching, so it depends on run order.
+  Compare candidates on `cost_uncached_list_usd_per_unit` (every input-side token at the base
+  input price) - the template's default efficiency metric.
 - `--json-schema` works but adds a tool round-trip (more tokens and latency); prefer JSON
   in the prompt plus `extract_json`.
 - Thinking cannot be fully turned off through `claude -p` for Haiku 5.5: effort `low` still

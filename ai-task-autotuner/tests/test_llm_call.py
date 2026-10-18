@@ -78,6 +78,17 @@ class LlmCallTest(unittest.TestCase):
         self.assertEqual(r["attempts"], 2)
         self.assertIsNone(r["usage"])
 
+    def test_empty_reply_retried_once(self):
+        seq = [proc(envelope("")), proc(envelope('{"a": 1}'))]
+        with mock.patch.object(llm_call.subprocess, "run", side_effect=seq) as run:
+            r = llm_call.call("hi", expect_json=True, retries=3)
+        self.assertTrue(r["ok"])
+        self.assertEqual(run.call_count, 2)
+        with mock.patch.object(llm_call.subprocess, "run", side_effect=[proc(envelope(""))] * 5) as run:
+            r = llm_call.call("hi", retries=3)
+        self.assertEqual((r["ok"], r["error_kind"], run.call_count), (False, "empty", 2))
+        self.assertFalse(llm_call.is_harness_failure(r))  # scored as the model's (empty) answer
+
     def test_parse_failure_is_flagged_not_harness(self):
         with mock.patch.object(llm_call.subprocess, "run", return_value=proc(envelope("no json here"))):
             r = llm_call.call("hi", expect_json=True)
@@ -104,6 +115,14 @@ class CommonTest(unittest.TestCase):
         self.assertAlmostEqual(short, 0.005)
         long = common.estimate_cost("claude-haiku-5-5", {"input": 150_000, "output": 0})
         self.assertAlmostEqual(long, 0.075)
+
+    def test_make_splits_spreads_small_strata(self):
+        ids = [f"u{i}" for i in range(40)]
+        strata = {i: ("small" if int(i[1:]) < 8 else "big") for i in ids}
+        sp = common.make_splits(ids, 20, 20, seed=3, strata=strata)
+        small_dev = sum(1 for i in sp["dev"] if strata[i] == "small")
+        self.assertEqual((len(sp["dev"]), len(sp["holdout"])), (20, 20))
+        self.assertEqual(small_dev, 4)  # proportional, not all in dev
 
     def test_make_splits_keeps_groups_together(self):
         ids = [f"u{i}" for i in range(20)]

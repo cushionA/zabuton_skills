@@ -40,9 +40,23 @@ def main():
     ap.add_argument("--no-oracle", metavar="REASON", help="only when an oracle output cannot be built")
     ap.add_argument("--dev", default="dev")
     ap.add_argument("--holdout", default="holdout")
+    ap.add_argument("--renoise", nargs=2, metavar=("RUN_A", "RUN_B"),
+                    help="re-measure the noise floor from two runs of the current best (e.g. at phase switch)")
     a = ap.parse_args()
     ws = Path(a.ws)
     ch = load_charter(ws)
+    if a.renoise:
+        items = [read_json(Path(r) / "score.json", {}).get("items", []) for r in a.renoise]
+        pi = paired_items(items[0], items[1])
+        floor = max(pi["band"] or 0.0, 1.0 / (pi["n"] or 1))
+        old = ch.get("noise") or {}
+        ch.setdefault("noise_history", []).append(old)
+        ch["noise"] = dict(old, band=pi["band"], flip_items=pi["improved"] + pi["regressed"], n_items=pi["n"],
+                           min_delta=floor, renoised_from=[str(r) for r in a.renoise], renoised_at=now_iso())
+        write_json(ws / "charter.json", ch)
+        print(f"noise re-measured on the incumbent: min_delta {old.get('min_delta')} -> {floor:.4f} "
+              f"({ch['noise']['flip_items']} flips / {pi['n']} items)")
+        return
     prim = ch.get("primary", {})
     null_max = prim.get("null_max", 0.0)
     oracle_min = prim.get("oracle_min", 0.999)

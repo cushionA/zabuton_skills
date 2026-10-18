@@ -32,7 +32,7 @@
     "quality": null,
     "efficiency": null
   },
-  "efficiency_metric": "cost_usd_per_unit",
+  "efficiency_metric": "cost_uncached_list_usd_per_unit",
   "limits": {
     "max_cost_usd": null,
     "max_hours": null,

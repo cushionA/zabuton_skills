@@ -5,8 +5,10 @@
 Writes:
   deliverables/pipeline/            final candidate (pipeline.py, prompts/, config.json)
   deliverables/production_config.json   recommended settings, each with the measurement behind it
-  deliverables/testset/             splits, references (with provenance note), constructed inputs if any
-  deliverables/eval_kit/            dataset.py, score.py, splits.json - rerun the measurement later
+  deliverables/eval/ + charter.json  dataset.py, score.py, splits.json, reference/ - the same layout as a
+                                    workspace, so run_experiment/validate_eval work on the deliverables folder
+                                    (fix machine-specific paths with relocate_workspace.py)
+  deliverables/data_built/          constructed task inputs, if any
   deliverables/MANIFEST.md          what is where (task_design.md, report.md and non_ai_findings.md are
                                     written by you; this script copies them if present in WS)
 
@@ -57,8 +59,9 @@ def recommend(ws, candidate, run_dirs):
     S = rec["settings"]
     S["backend_measured"] = cfg.get("backend", "cli")
     S["model"] = {"value": cfg.get("model"), "served": sorted({c.get("model_served") for c in calls if c.get("model_served")})}
-    S["effort"] = {"value": cfg.get("effort"), "why": "as measured; lower effort was " + (
-        "tested" if any("effort" in json.dumps(m.get("config", {})) for m in metas) else "not tested")}
+    tried = sorted({str(r.get("config", {}).get("effort")) for r in list_runs(ws) if r.get("purpose") != "smoke"})
+    S["effort"] = {"value": cfg.get("effort"),
+                   "why": f"as measured; efforts measured in this workspace: {tried} ('low' is the lowest level)"}
     S["thinking"] = {"value": cfg.get("thinking", "off"),
                      "measured_thinking_tokens_per_call": {"p50": percentile(thinking, .5), "max": max(thinking) if thinking else None}}
     if outs:
@@ -83,14 +86,16 @@ def recommend(ws, candidate, run_dirs):
                            "measured_cache_hit_ratio": [s.get("cache_hit_ratio") for s in summaries]}
     E = rec["expectations"]
     units = sum(s.get("units", 0) for s in summaries)
-    cost = sum(s.get("cost_usd") or 0 for s in summaries)
     unc = [s.get("cost_uncached_list_usd") for s in summaries]
     E["calls_per_unit"] = (len(calls) / units) if units else None
-    E["cost_usd_per_unit_measured"] = (cost / units) if units else None
-    E["cost_usd_per_1000_units_measured"] = (1000 * cost / units) if units else None
-    E["cost_basis"] = "claude -p reported list price incl. its caching" if S["backend_measured"] == "cli" else "list-price estimate"
     if None not in unc and units:
         E["cost_usd_per_unit_uncached_list"] = sum(unc) / units
+        E["cost_usd_per_1000_units_uncached_list"] = 1000 * sum(unc) / units
+    # cli-reported cost depends on cache state (claude -p caches whole prompts): list runs separately
+    E["cost_per_unit_by_run"] = [{"run": Path(d).name, "cli_reported": s.get("cost_usd_per_unit"),
+                                  "cache_hit_ratio": s.get("cache_hit_ratio")} for d, s in zip(run_dirs, summaries)]
+    E["cost_basis"] = ("uncached list price of every input-side token (backend-neutral); cli-reported costs per run "
+                       "are shown with their cache hit ratio - a warm rerun can be several times cheaper")
     E["api_ms_per_call_p50"] = percentile(api, .5) if api else None
     E["unit_wall_ms_p50"] = percentile([s.get("unit_wall_ms", {}).get("p50") for s in summaries], .5)
     if S["backend_measured"] == "cli":
@@ -119,20 +124,18 @@ def main():
     if not runs:
         sys.exit("no measured runs of this candidate")
     shutil.copytree(cand, out / "pipeline", dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__"))
-    for name in ("dataset.py", "score.py", "splits.json", "eval_spec.md"):
+    for name in ("dataset.py", "score.py", "splits.json", "eval_spec.md", "validation.json"):
         src = ws / "eval" / name
         if src.exists():
-            (out / "eval_kit").mkdir(exist_ok=True)
-            shutil.copy2(src, out / "eval_kit" / name)
+            (out / "eval").mkdir(exist_ok=True)
+            shutil.copy2(src, out / "eval" / name)
     ref = ws / "eval" / "reference"
-    if ref.exists():
-        shutil.copytree(ref, out / "testset" / "reference", dirs_exist_ok=True)
-    if (ws / "eval" / "splits.json").exists():
-        (out / "testset").mkdir(exist_ok=True)
-        shutil.copy2(ws / "eval" / "splits.json", out / "testset" / "splits.json")
+    if ref.exists() and any(f.is_file() for f in ref.rglob("*")):
+        shutil.copytree(ref, out / "eval" / "reference", dirs_exist_ok=True)
+    shutil.copy2(ws / "charter.json", out / "charter.json")
     built = ws / "data_built"
     if built.exists():
-        shutil.copytree(built, out / "testset" / "data_built", dirs_exist_ok=True)
+        shutil.copytree(built, out / "data_built", dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__"))
     rec = recommend(ws, a.candidate, runs)
     write_json(out / "production_config.json", rec)
     copied = []
@@ -144,8 +147,9 @@ def main():
                 "| path | content |", "|---|---|",
                 "| pipeline/ | final pipeline code, prompts and config |",
                 "| production_config.json | recommended settings with the measurements behind them |",
-                "| eval_kit/ | dataset/splits/scorer to re-measure later |",
-                "| testset/ | splits, reference answers (see eval_spec.md for provenance), constructed task data |"]
+                "| eval/, charter.json | dataset, splits, scorer, reference (provenance in eval/eval_spec.md) - "
+                "re-measure later with run_experiment.py on this folder after relocate_workspace.py |",
+                "| data_built/ | constructed task inputs (if the task was derived from raw data) |"]
     manifest += [f"| {n} | |" for n in copied]
     missing = [n for n in ("task_design.md", "report.md") if n not in copied]
     if missing:
@@ -155,7 +159,7 @@ def main():
     print(f"deliverables -> {out}")
     print(f"  max_tokens={s.get('max_tokens', {}).get('value')} timeout_s={s.get('timeout_s', {}).get('value')} "
           f"concurrency={s['concurrency']['value']} effort={s['effort']['value']} thinking={s['thinking']['value']}")
-    print(f"  cost/unit={rec['expectations'].get('cost_usd_per_unit_measured')} ({rec['expectations']['cost_basis']})")
+    print(f"  cost/unit uncached list={rec['expectations'].get('cost_usd_per_unit_uncached_list')}")
     for c in rec["caveats"]:
         print(f"  caveat: {c}")
     if missing:

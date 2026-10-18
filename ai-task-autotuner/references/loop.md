@@ -62,7 +62,10 @@ Compared with the current best on the same split and eval version, items paired 
 
 **Quality phase** - maximize the primary metric under the guards. Ends when the quality target
 is met, or on plateau: >= `patience` (5) non-keeps since the last keep, covering >= 3 lever
-groups, with a fresh-eyes round done. Then `ledger.py phase WS efficiency` (floor = best minus
+groups, with a fresh-eyes round done. Before declaring a plateau, re-measure noise on the
+incumbent (`validate_eval.py WS --renoise RUN_A RUN_B` on two runs of the best): a stabilized
+prompt often flips far fewer items than the baseline did, which lowers min_delta and can reveal
+headroom the baseline noise hid. Then `ledger.py phase WS efficiency` (floor = best minus
 min_delta) and, optionally, one holdout check of the best (`--split holdout --purpose holdout`)
 to catch overfitting early.
 
@@ -81,6 +84,11 @@ simplify. Order the levers by expected gain per risk:
 5. re-check one quality lever on the cheaper configuration (prompt wins do not always transfer).
 
 Report cost per completed unit, not per call: a cheaper call that fails more is not cheaper.
+Each efficiency keep may give back a little quality; `status` prints the DRIFT since the phase
+switch and warns when the cumulative drop exceeds min_delta - check holdout before cutting further.
+Runs broken by infrastructure (quota, outages) never count: the ledger skips quota-exhausted runs,
+and `ledger.py void WS RUN --reason` excludes any other broken run. Concurrency is a runtime knob:
+`run_experiment.py --concurrency N` changes it without editing (and re-freezing) the candidate.
 
 ## Avoiding dead ends
 
@@ -133,7 +141,8 @@ In priority order:
    write the state and stop; after the reset `ledger.py clock WS resume` and rerun the void
    experiment. If your own session was cut off (quota, crash), start the resumed session with
    `ledger.py clock WS resume --gap` - it books the silent gap as an outage. Time limits count
-   active time only.
+   active time only: put a duration ("2 hours") in `limits.max_hours`; `limits.deadline` is an
+   absolute wall-clock time and does not move with pauses.
 5. Never stop silently: `ledger.py stop WS --reason "..."`, then finalize.
 
 ## Finalize

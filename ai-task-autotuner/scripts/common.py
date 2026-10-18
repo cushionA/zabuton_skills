@@ -322,8 +322,10 @@ def make_splits(ids, dev_n, holdout_n, seed=0, groups=None, strata=None):
     """Random, stratified, group-aware split.
 
     Whole groups (near-duplicates, same source page, same parent product...) go to
-    one split so nothing leaks between dev and holdout. Never choose splits by
-    baseline score - that buys regression to the mean instead of improvement.
+    one split so nothing leaks between dev and holdout. Each group goes to the open split
+    whose share of that group's stratum is furthest below target, so small strata are spread
+    over dev and holdout instead of filling dev first. Never choose splits by baseline score -
+    that buys regression to the mean instead of improvement.
     """
     rng = random.Random(seed)
     groups = groups or {i: i for i in ids}
@@ -339,16 +341,21 @@ def make_splits(ids, dev_n, holdout_n, seed=0, groups=None, strata=None):
         rng.shuffle(gs)
     order = []
     while any(by_stratum.values()):
-        for s in sorted(by_stratum, key=str):
-            if by_stratum[s]:
-                order.append(by_stratum[s].pop())
-    dev, hold, rest = [], [], []
+        for st in sorted(by_stratum, key=str):
+            if by_stratum[st]:
+                order.append(by_stratum[st].pop())
+    total = len(ids) or 1
+    target = {"dev": dev_n, "holdout": holdout_n}
+    out = {"dev": [], "holdout": [], "rest": []}
+    per = {k: {} for k in target}
     for g in order:
         members = g2ids[g]
-        if len(dev) < dev_n:
-            dev += members
-        elif len(hold) < holdout_n:
-            hold += members
-        else:
-            rest += members
-    return {"dev": dev, "holdout": hold, "rest": rest}
+        st = strata[members[0]]
+        open_splits = [k for k in target if len(out[k]) < target[k]]
+        if not open_splits:
+            out["rest"] += members
+            continue
+        k = min(open_splits, key=lambda k: (per[k].get(st, 0) / (target[k] / total), -(target[k] - len(out[k]))))
+        out[k] += members
+        per[k][st] = per[k].get(st, 0) + len(members)
+    return out

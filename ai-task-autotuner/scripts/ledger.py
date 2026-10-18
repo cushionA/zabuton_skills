@@ -10,6 +10,7 @@ and anti-dead-end steering. State lives in WS/ledger.jsonl; `status` is the resu
   python ledger.py phase WS efficiency [--floor 0.82] --reason "..."
   python ledger.py clock WS pause|resume --reason "waiting for the user" [--at ISO]  # limits count active time
   python ledger.py history WS                  # markdown table of all experiments for the report
+  python ledger.py void WS RUN_ID --reason "..."   # exclude an infra-broken run from decisions
   python ledger.py stop WS --reason "..."
 
 Levers (use the group.detail form; groups drive the diversity rules):
@@ -79,8 +80,11 @@ def _next_exp_id(props):
 
 def _exp_runs(ws, exp, split):
     eh = eval_hash(ws)
+    voided = {r["run"] for r in ledger_rows(ws) if r.get("event") == "void_run"}
     out = []
     for m in list_runs(ws):
+        if m["run_id"] in voided or m["_summary"].get("quota_exhausted"):
+            continue  # infra-broken runs never enter a decision
         if m.get("exp") == exp and m.get("split") == split and m.get("purpose") in ("experiment", "baseline", "confirm"):
             if m.get("limit"):
                 continue  # partial runs never count
@@ -222,7 +226,7 @@ def decide(ws, exp, split="dev", override=None, reason=None):
             if not q_ok:
                 decision, why = "discard", f"primary {cand['primary']:.4f} below floor {floor}"
             elif gain is not None and gain >= min_eff:
-                near_floor = floor is not None and direction * (cand["primary"] - floor) < min_delta
+                near_floor = floor is not None and direction * (cand["primary"] - floor) < min_delta / 2
                 decision = "rerun" if (near_floor and cand["n_runs"] < 2) else "keep"
                 why = f"{eff_metric} -{gain:.0%} with primary held" + (" (near floor: confirm with a repeat)" if decision == "rerun" else "")
             elif delta >= min_delta and (gain is None or gain > -0.05) and pi["improved"] > pi["regressed"]:
@@ -398,6 +402,16 @@ def print_status(ws, compact=False, write=False):
                      f"headroom={noise.get('headroom')}")
     if ch.get("quality_floor") is not None:
         lines.append(f"FLOOR primary >= {ch['quality_floor']}")
+        switch = [r for r in st["rows"] if r.get("event") == "phase" and r.get("to") == "efficiency"]
+        if switch and best:
+            at_switch = [d for d in st["decisions"].values() if d.get("decision") in KEEPS and d["at"] <= switch[-1]["at"]]
+            if at_switch:
+                top = at_switch[-1]["primary"]
+                drop = top - best["primary"]
+                md = (ch.get("noise") or {}).get("min_delta") or 0.0
+                lines.append(f"DRIFT since phase switch: {top:.4f} -> {best['primary']:.4f} ({-drop:+.4f})"
+                             + ("  <- cumulative drop exceeds min_delta: check holdout before cutting further"
+                                if drop > md else ""))
     lines.append(f"STALL {r['stall']} non-keeps since last keep; groups since: {r['groups_since']}")
     lines.append("LEVERS kept/tried: " + ", ".join(f"{g} {k}/{t}" for g, (k, t) in sorted(r["tried"].items()))
                  + f" | untried: {r['untried']}")
@@ -445,9 +459,10 @@ def cmd_history(ws):
         prim = d.get("primary")
         delta = d.get("delta")
         eff = d.get("eff")
+        effs = '' if eff is None else f"{eff:.6g} ({d.get('eff_metric')})"
         print(f"| {e} | {p.get('lever')} | {p.get('candidate')} | {p.get('hypothesis', '')[:80]} | "
               f"{'' if prim is None else f'{prim:.4f}'} | {'' if delta is None else f'{delta:+.4f}'} | "
-              f"{'' if eff is None else f'{eff:.6g}'} | {d.get('decision', 'pending')} | {str(d.get('reason', ''))[:80]} |")
+              f"{effs} | {d.get('decision', 'pending')} | {str(d.get('reason', ''))[:80]} |")
     for r in st["rows"]:
         if r.get("event") in ("phase", "stop", "mark", "clock"):
             print(f"<!-- {r['event']} {r.get('at')} {r.get('to') or r.get('kind') or r.get('action') or ''}: "
@@ -509,6 +524,10 @@ def main():
                     help="with resume: treat the time since the last file change in WS as an outage (session died)")
     hi = sub.add_parser("history")
     hi.add_argument("ws")
+    vr = sub.add_parser("void")
+    vr.add_argument("ws")
+    vr.add_argument("run", help="run id (directory name under runs/)")
+    vr.add_argument("--reason", required=True)
     sp = sub.add_parser("stop")
     sp.add_argument("ws")
     sp.add_argument("--reason", required=True)
@@ -557,6 +576,9 @@ def main():
             row["epoch"] = _epoch(row) if a.at else time.time()
             append_jsonl(Path(a.ws) / "ledger.jsonl", row)
             print(f"clock {a.action}d")
+    elif a.cmd == "void":
+        append_jsonl(Path(a.ws) / "ledger.jsonl", {"event": "void_run", "run": a.run, "reason": a.reason, "at": now_iso()})
+        print(f"run {a.run} voided: excluded from decisions")
     elif a.cmd == "history":
         cmd_history(a.ws)
     elif a.cmd == "stop":

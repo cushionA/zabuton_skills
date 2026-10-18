@@ -116,7 +116,8 @@ not below the headroom, the loop cannot show real wins: enlarge dev or change th
    prompt. Copy the best candidate to `candidates/cNNN-<slug>` and change only that.
 4. `ledger.py propose WS --candidate ... --parent ... --lever group.detail --hypothesis ...
    --expect ... --falsifier ...` (the novelty check refuses repeats of failed directions).
-5. Smoke it (`--purpose smoke --limit 2`, free to edit), then `run_experiment.py WS --exp EXXX`.
+5. Smoke it (`--purpose smoke --limit 2`, free to edit), then `run_experiment.py WS --exp EXXX`
+   (`--concurrency N` adjusts parallelism without touching the frozen candidate).
    Runs longer than ~2 minutes go in the background; do not poll with sleep.
 6. `ledger.py decide WS EXXX`, then add a 2-4 line English block to `journal.md`.
 
@@ -141,9 +142,11 @@ At the end the user gets, under `WS/deliverables/` (`export_deliverables.py WS -
 `task_design.md` (the final task: steps, what code does, what the model does, prompts, I/O
 schema, how to operate it), `production_config.json` (max_tokens, timeout, concurrency, effort,
 thinking, caching, expected cost and latency per unit - each with the measurement behind it),
-the pipeline code and prompts, `testset/` (splits, reference with provenance, any constructed
-task data), `eval_kit/` (to re-measure later), `report.md`, and `non_ai_findings.md` when code
-alone did well. Write `task_design.md` and `report.md` yourself (report.md lists their sections).
+the pipeline code and prompts, `eval/` + `charter.json` + `data_built/` (splits, reference with
+provenance, constructed task data - the workspace layout, so the measurement can be re-run on
+the deliverables folder after `relocate_workspace.py`), `report.md`, and `non_ai_findings.md`
+when code alone did well. Write `task_design.md` and `report.md` yourself (report.md lists their
+sections). If a file-writing tool refuses a report file in your environment, write it with the shell.
 
 ## Context discipline
 
@@ -180,6 +183,7 @@ The loop can run for hours; protect the context window.
 | `ledger.py` | propose/decide/status/history/compare/mark/phase/clock/stop with anti-dead-end steering |
 | `analyze_run.py` | compact run analysis, comparisons, `--show`, failure dumps, pass^k |
 | `export_deliverables.py` | deliverables folder and measured production settings |
+| `relocate_workspace.py` | point a moved workspace (or deliverables folder) at local skill/data paths |
 
 All are Python 3.10+ standard library (the api backend additionally needs `anthropic`), and work
 on Windows: prompts go through stdin, system prompts through a file.

@@ -140,6 +140,10 @@ def _cli_attempt(prompt, system, model, effort, json_schema, timeout, extra_args
         rec.update(ok=False, error_kind="api" if status else "harness",
                    error=f"status={status} {text[:300]}", retryable=retryable)
         return rec
+    if not (rec["text"] or "").strip() and rec["structured"] is None:
+        # seen occasionally from claude -p: end_turn with empty text; a re-call usually works
+        rec.update(ok=False, error_kind="empty", error="empty reply", retryable=True)
+        return rec
     rec["ok"] = True
     return rec
 
@@ -224,6 +228,8 @@ def call(prompt, system=None, *, backend="cli", model="haiku", effort=None, max_
             cost += rec["cost_usd"]
         if rec.get("ok") or not rec.get("retryable"):
             break
+        if rec.get("error_kind") == "empty" and attempts >= 2:
+            break  # one retry is enough for empty replies; then it is the model's answer
         attempt_errors.append(rec.get("error"))
         if attempt < retries:
             time.sleep(min(30, 2 ** (attempt + 1)) * (0.75 + 0.5 * (time.time() % 1)))
