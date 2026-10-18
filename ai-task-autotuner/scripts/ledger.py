@@ -8,6 +8,8 @@ and anti-dead-end steering. State lives in WS/ledger.jsonl; `status` is the resu
   python ledger.py compare WS RUN_A RUN_B       # paired item comparison
   python ledger.py mark WS fresh-eyes "what the fresh look found"   # or: categorize, headroom
   python ledger.py phase WS efficiency [--floor 0.82] --reason "..."
+  python ledger.py clock WS pause|resume --reason "waiting for the user"   # time limits count active time
+  python ledger.py history WS                  # markdown table of all experiments for the report
   python ledger.py stop WS --reason "..."
 
 Levers (use the group.detail form; groups drive the diversity rules):
@@ -106,6 +108,7 @@ def _pool(runs, eff_metric):
         "harness": max(r["summary"].get("harness_error_rate", 0) for r in runs),
         "gate_failures": sum(r["summary"].get("gate_failures", 0) for r in runs),
         "items": items, "n_runs": len(runs), "runs": [r["run_id"] for r in runs],
+        "ai_free": all(r["summary"].get("ai_free") for r in runs),
     }
 
 
@@ -180,7 +183,8 @@ def decide(ws, exp, split="dev", override=None, reason=None):
     best = st["best"]
     out = {"event": "decide", "exp": exp, "at": now_iso(), "split": split, "phase": ch.get("phase", "quality"),
            "candidate": prop["candidate"], "lever": prop.get("lever"), "runs": cand["runs"],
-           "primary": cand["primary"], "metrics": cand["metrics"], "eff_metric": eff_metric, "eff": cand["eff"]}
+           "primary": cand["primary"], "metrics": cand["metrics"], "eff_metric": eff_metric, "eff": cand["eff"],
+           "ai_free": cand["ai_free"]}
     best_pool = None
     if best:
         best_runs = _exp_runs(ws, best["exp"], split)
@@ -247,11 +251,27 @@ def decide(ws, exp, split="dev", override=None, reason=None):
     print_status(ws, compact=True)
 
 
+def active_hours(ws, ch):
+    """Hours since the workspace was created, minus time paused while waiting for the user."""
+    created = ch.get("created_epoch") or time.time()
+    paused, since = 0.0, None
+    for r in ledger_rows(ws):
+        if r.get("event") != "clock":
+            continue
+        if r["action"] == "pause" and since is None:
+            since = r.get("epoch", time.time())
+        elif r["action"] == "resume" and since is not None:
+            paused += r.get("epoch", time.time()) - since
+            since = None
+    if since is not None:
+        paused += time.time() - since
+    return (time.time() - created - paused) / 3600, since is not None
+
+
 def _limits(ws, ch):
     runs = list_runs(ws)
     spent = sum((m["_summary"].get("cost_usd") or 0) for m in runs)
-    created = ch.get("created_epoch") or time.time()
-    hours = (time.time() - created) / 3600
+    hours, paused = active_hours(ws, ch)
     lim = ch.get("limits", {})
     n_exp = len([r for r in ledger_rows(ws) if r.get("event") == "propose"])
     hold = sum(1 for m in runs if m.get("purpose") == "holdout")
@@ -264,7 +284,19 @@ def _limits(ws, ch):
         hit.append(f"experiments {n_exp} >= {lim['max_experiments']}")
     if lim.get("deadline") and time.strftime("%Y-%m-%dT%H:%M") >= lim["deadline"][:16]:
         hit.append(f"deadline {lim['deadline']} passed")
-    return {"spent": spent, "hours": hours, "n_exp": n_exp, "holdout_evals": hold, "hit": hit, "limits": lim}
+    return {"spent": spent, "hours": hours, "paused": paused, "n_exp": n_exp, "holdout_evals": hold, "hit": hit,
+            "limits": lim}
+
+
+def _gate(ws):
+    gate = read_json(Path(ws) / "audit" / "quality_gate.json")
+    if not gate:
+        return "AUDIT", "no quality gate yet: profile, checks.py, close read, data_audit.md, quality_gate.py"
+    if gate["status"] == "INCOMPLETE":
+        return "AUDIT", "audit incomplete: " + "; ".join(f["title"] for f in gate["findings"] if f["severity"] == "procedure")
+    if gate["status"] == "STOP" or (gate["status"] == "REVIEW" and not gate.get("waiver")):
+        return "WAIT_USER", f"quality gate {gate['status']}: report findings to the user and wait (clock paused)"
+    return None
 
 
 def recommend(ws):
@@ -296,8 +328,11 @@ def recommend(ws):
     targets = ch.get("targets", {})
     best = st["best"]
     rec = ("CONTINUE", "exploit around the best; one hypothesis per experiment")
+    gate_rec = _gate(ws)
     if st["stops"]:
         rec = ("STOPPED", st["stops"][-1].get("reason", ""))
+    elif gate_rec:
+        rec = gate_rec
     elif lim["hit"]:
         rec = ("STOP", "limit reached: " + "; ".join(lim["hit"]) + " -> finalize (holdout, full run, report)")
     elif pending:
@@ -356,7 +391,16 @@ def print_status(ws, compact=False, write=False):
     lines.append("LEVERS kept/tried: " + ", ".join(f"{g} {k}/{t}" for g, (k, t) in sorted(r["tried"].items()))
                  + f" | untried: {r['untried']}")
     L = lim["limits"]
-    lines.append(f"LIMITS cost ${lim['spent']:.3f}/{L.get('max_cost_usd')} hours {lim['hours']:.1f}/{L.get('max_hours')} "
+    ai_free = [d for d in st["decisions"].values() if d.get("ai_free") and d.get("primary") is not None]
+    if ai_free:
+        bf = max(ai_free, key=lambda d: d["primary"])
+        md = (ch.get("noise") or {}).get("min_delta") or 0.0
+        gap = (best["primary"] - bf["primary"]) if best else None
+        note = " <- within noise of the best: report that the model may be unnecessary" if (
+            gap is not None and gap <= md) else ""
+        lines.append(f"NO-LLM best {bf['exp']} {bf['candidate']} primary={bf['primary']:.4f} (gap {gap}){note}")
+    lines.append(f"LIMITS cost ${lim['spent']:.3f}/{L.get('max_cost_usd')} hours {lim['hours']:.1f}/{L.get('max_hours')}"
+                 f"{' (clock paused)' if lim['paused'] else ''} "
                  f"exps {lim['n_exp']}/{L.get('max_experiments')} holdout {lim['holdout_evals']}/"
                  f"{ch.get('loop', {}).get('max_holdout_evals', 3)}")
     lines.append(f"RECOMMEND {r['rec'][0]}: {r['rec'][1]}")
@@ -379,6 +423,24 @@ def print_status(ws, compact=False, write=False):
         card = ("# STATE (resume card)\n\nRegenerated by `ledger.py status --write`. To resume: read this card, "
                 "the last ~40 lines of journal.md, then act on RECOMMEND.\n\n```\n" + text + "\n```\n")
         (ws / "STATE.md").write_text(card, encoding="utf-8")
+
+
+def cmd_history(ws):
+    st = _state(ws)
+    print("| exp | lever | candidate | hypothesis | primary | delta | eff | decision | reason |")
+    print("|---|---|---|---|---|---|---|---|---|")
+    for e in sorted(st["props"], key=lambda x: int(x.lstrip("E")) if x.lstrip("E").isdigit() else 0):
+        p, d = st["props"][e], st["decisions"].get(e, {})
+        prim = d.get("primary")
+        delta = d.get("delta")
+        eff = d.get("eff")
+        print(f"| {e} | {p.get('lever')} | {p.get('candidate')} | {p.get('hypothesis', '')[:80]} | "
+              f"{'' if prim is None else f'{prim:.4f}'} | {'' if delta is None else f'{delta:+.4f}'} | "
+              f"{'' if eff is None else f'{eff:.6g}'} | {d.get('decision', 'pending')} | {str(d.get('reason', ''))[:80]} |")
+    for r in st["rows"]:
+        if r.get("event") in ("phase", "stop", "mark", "clock"):
+            print(f"<!-- {r['event']} {r.get('at')} {r.get('to') or r.get('kind') or r.get('action') or ''}: "
+                  f"{r.get('reason') or r.get('text') or ''} -->")
 
 
 def cmd_compare(a):
@@ -427,6 +489,12 @@ def main():
     ph.add_argument("to", choices=["quality", "efficiency"])
     ph.add_argument("--floor", type=float)
     ph.add_argument("--reason", default="")
+    cl = sub.add_parser("clock")
+    cl.add_argument("ws")
+    cl.add_argument("action", choices=["pause", "resume"])
+    cl.add_argument("--reason", default="")
+    hi = sub.add_parser("history")
+    hi.add_argument("ws")
     sp = sub.add_parser("stop")
     sp.add_argument("ws")
     sp.add_argument("--reason", required=True)
@@ -456,6 +524,17 @@ def main():
         ch["quality_floor"] = floor
         write_json(ws / "charter.json", ch)
         print(f"phase -> {a.to}; quality floor = {floor}")
+    elif a.cmd == "clock":
+        rows = [r for r in ledger_rows(a.ws) if r.get("event") == "clock"]
+        state = rows[-1]["action"] if rows else "resume"
+        if state == a.action:
+            print(f"clock already {a.action}d")
+        else:
+            append_jsonl(Path(a.ws) / "ledger.jsonl", {"event": "clock", "action": a.action, "reason": a.reason,
+                                                       "at": now_iso(), "epoch": time.time()})
+            print(f"clock {a.action}d")
+    elif a.cmd == "history":
+        cmd_history(a.ws)
     elif a.cmd == "stop":
         append_jsonl(Path(a.ws) / "ledger.jsonl", {"event": "stop", "reason": a.reason, "at": now_iso()})
         print("stopped")

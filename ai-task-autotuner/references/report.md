@@ -35,7 +35,13 @@ reported by the backend" - never fill gaps with estimates presented as measureme
     (ids, short quotes), especially for the hard strata.
 11. **Rules, dictionaries, maintenance** - size of rules/vocabularies/prompts, what would need
     updating when the data or site changes, expected maintenance effort.
-12. **Limitations and next steps** - reference bias, data not independent of past
+12. **What code alone achieves** - the best no-model candidate, the share of items code decides
+    in the final pipeline and its agreement; if code alone is within noise of the best, say so
+    first in the summary (details in `non_ai_findings.md`).
+13. **Production settings** - from `deliverables/production_config.json`: max_tokens, timeout,
+    concurrency, effort/thinking, caching, expected cost and latency per unit and per 1,000
+    units, each with the measurement it comes from and the backend caveats.
+14. **Limitations and next steps** - reference bias, data not independent of past
     development, untested backends, levers left untried, what more budget would buy.
 
 ## History table (from the ledger)
@@ -43,4 +49,10 @@ reported by the backend" - never fill gaps with estimates presented as measureme
 ```
 | exp | lever | change | dev primary | delta | cost/unit | decision |
 ```
-Build it from `ledger.jsonl` decide events; include discarded rows - they show the search.
+`ledger.py history WS` prints it; include discarded rows - they show the search.
+
+## Final message to the user
+
+Short, in their language: what was built, the headline numbers with their names (accuracy vs
+agreement), whether code alone suffices for some or all of it, the recommended settings, where
+the deliverables are, and the main limitation.

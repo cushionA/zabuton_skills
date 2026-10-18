@@ -131,6 +131,12 @@ def profile_records(records, max_depth):
             d["records_sharing_value"] = sum(len(r) for r in shared)
             if shared:
                 d["dup_examples"] = [str(k)[:80] for k, recs in fs.value_records.items() if len(recs) > 1][:3]
+        elif fs.per_record_max > 1 and fs.value_records and len(fs.value_records) > 0.5 * fs.count:
+            # list elements that look like ids: values reused across records (same row in two units?)
+            shared = [k for k, recs in fs.value_records.items() if len(recs) > 1]
+            d["values_in_multiple_records"] = len(shared)
+            if shared:
+                d["dup_examples"] = [str(k)[:80] for k in shared[:3]]
         d["unique_key_candidate"] = bool(
             fs.per_record_max == 1 and fs.records_with == n and fs.nulls == 0 and not fs.capped
             and d.get("distinct") == n and set(fs.types) <= {"string", "number"})
@@ -231,13 +237,27 @@ def render_md(results, max_rows):
             continue
         lines.append("| path | rec% | null% | types | distinct | len/num min/p50/p90/max | dups | notes |")
         lines.append("|---|---|---|---|---|---|---|---|")
-        for i, (path, d) in enumerate(fields.items()):
-            if i >= max_rows:
-                lines.append(f"| ... {len(fields) - max_rows} more paths in the .json |")
+        # Never hide the rows that matter for an audit (duplicates, key candidates, nulls,
+        # mixed types); drop plain rows first when over max_rows.
+        def interesting(d):
+            return (d.get("records_sharing_value") or d.get("values_in_multiple_records")
+                    or d.get("unique_key_candidate") or (d.get("null_pct") or 0) > 0 or len(d["types"]) > 1)
+        keep = [p for p, d in fields.items() if interesting(d)]
+        for p in fields:
+            if len(keep) >= max_rows:
                 break
+            if p not in keep:
+                keep.append(p)
+        keep = set(keep)
+        hidden = len(fields) - len(keep)
+        for path, d in fields.items():
+            if path not in keep:
+                continue
             types = ",".join(f"{t}:{c}" for t, c in d["types"].items()) if len(d["types"]) > 1 else next(iter(d["types"]))
             distinct = f">{DISTINCT_CAP}" if d["distinct_capped"] else (d["distinct"] or "")
             dups = d.get("records_sharing_value", "")
+            if d.get("values_in_multiple_records"):
+                dups = f"{d['values_in_multiple_records']} vals x-rec"
             notes = []
             if d.get("unique_key_candidate"):
                 notes.append("KEY?")
@@ -247,6 +267,8 @@ def render_md(results, max_rows):
                 notes.append("dup e.g. " + " ; ".join(_cell(x, 40) for x in d["dup_examples"][:2]))
             lines.append(f"| {path} | {d['records_with_pct']} | {d['null_pct']} | {types} | {distinct} | "
                          f"{_fmt_stats(d)} | {dups} | {'; '.join(notes)[:160]} |")
+        if hidden:
+            lines.append(f"| ... {hidden} plain paths (no dups/nulls/keys) only in the .json |")
     return "\n".join(lines)
 
 
@@ -255,7 +277,7 @@ def main():
     ap.add_argument("paths", nargs="+")
     ap.add_argument("--out", help="output prefix, e.g. WS/audit/profile")
     ap.add_argument("--max-depth", type=int, default=5)
-    ap.add_argument("--max-rows", type=int, default=60, help="field rows per file in the compact view")
+    ap.add_argument("--max-rows", type=int, default=80, help="field rows per file in the compact view")
     a = ap.parse_args()
     results = []
     for p in a.paths:

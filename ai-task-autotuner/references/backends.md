@@ -22,8 +22,14 @@ Measured on 2026-10-18 (Claude Code 2.1.302, Haiku 5.5), expect drift - re-run
   input-side token at the base input price as a backend-neutral comparison point.
 - `--json-schema` works but adds a tool round-trip (more tokens and latency); prefer JSON
   in the prompt plus `extract_json`.
-- Pass `--effort` explicitly (configs default to `low`); the CLI's own default may differ from
-  the API default. Thinking tokens are reported per call (`usage.thinking`).
+- Thinking cannot be fully turned off through `claude -p` for Haiku 5.5: effort `low` still
+  produced ~150-280 thinking tokens on a small arithmetic prompt (`MAX_THINKING_TOKENS=0` and
+  `alwaysThinkingEnabled: false` did not stop it). Use effort `low` as the minimum, report
+  `usage.thinking`, and note that the api backend with thinking off would save those tokens.
+  Pass `--effort` explicitly; the CLI default may differ from the API default.
+- Quota: `claude -p` spends the same subscription limits as the session running the skill. A
+  session-limit error (`error_kind: "quota"`) is not retried; the runner stops launching calls
+  and marks the run void. Heavy strong-model jobs are the usual cause - price them first.
 - 8 concurrent calls ran without throttling here; raise or lower `concurrency` per measured
   errors. Retries back off with jitter and are counted; failed-attempt usage still counts.
 - Windows: `claude` is a `.CMD` shim; argv passes through cmd.exe. Prompts via stdin and the
@@ -39,8 +45,10 @@ Set `"backend": "api"` and install the SDK (`python -m pip install anthropic`); 
 come from the environment (`ANTHROPIC_API_KEY` or an `ant auth login` profile). Aliases map
 to `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5`. `effort` goes to
 `output_config.effort`; a JSON schema to `output_config.format`; the system prompt carries
-`cache_control`. Usage comes from `response.usage` (thinking tokens when reported); cost is a
-list-price estimate (`common.PRICES`; Haiku 5.5 doubles past 100K input tokens). For large
+`cache_control`. `thinking: "off"` (the default) sends `{"type": "disabled"}` for Haiku 5.5 and
+`{"type": "between_tools"}` for Sonnet 5.5 (both only at effort high or below); Opus 5.5 cannot
+disable thinking - lower the effort instead. Usage comes from `response.usage` (thinking tokens when reported); cost is a
+list-price estimate (`common.PRICES`; Haiku 5.5 is priced higher past 100K input tokens). For large
 final runs the Batches API halves cost but is not wired in here.
 
 The api backend was not exercised live when this skill was written (no key in that

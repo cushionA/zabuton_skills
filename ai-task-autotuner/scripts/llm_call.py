@@ -27,6 +27,10 @@ from common import MODEL_ALIASES, estimate_cost, extract_json, sha256_text  # no
 
 DEFAULT_SYSTEM = "Follow the user's instructions exactly."
 RETRYABLE_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
+# Subscription/session quota exhaustion: retrying only burns time until the reset.
+QUOTA_MARKERS = ("session limit", "usage limit", "hit your limit", "limit reached", "resets ")
+# thinking="off" per model family on the api backend (cli cannot turn adaptive thinking off)
+API_THINKING_OFF = {"claude-haiku-5-5": {"type": "disabled"}, "claude-sonnet-5-5": {"type": "between_tools"}}
 # Flags that strip Claude Code's own context so the call behaves like a bare API
 # request: no tools, no settings/CLAUDE.md, no MCP, no skills, no saved session.
 CLI_ISOLATION = [
@@ -127,7 +131,10 @@ def _cli_attempt(prompt, system, model, effort, json_schema, timeout, extra_args
            "text": env.get("result"), "structured": env.get("structured_output")}
     if env.get("is_error") or r.returncode != 0:
         status = env.get("api_error_status")
-        text = str(env.get("result") or "")
+        text = str(env.get("result") or "") + " " + (r.stderr or "")[-300:]
+        if any(m in text.lower() for m in QUOTA_MARKERS):
+            rec.update(ok=False, error_kind="quota", error=f"quota exhausted: {text[:300]}", retryable=False)
+            return rec
         retryable = status in RETRYABLE_STATUS or (status is None and any(
             w in text.lower() for w in ("overload", "rate limit", "timeout", "temporarily")))
         rec.update(ok=False, error_kind="api" if status else "harness",
@@ -137,7 +144,7 @@ def _cli_attempt(prompt, system, model, effort, json_schema, timeout, extra_args
     return rec
 
 
-def _api_attempt(prompt, system, model, effort, json_schema, timeout, max_tokens, cache_system):
+def _api_attempt(prompt, system, model, effort, json_schema, timeout, max_tokens, cache_system, thinking):
     try:
         import anthropic  # official SDK; only needed for the api backend
     except ImportError:
@@ -147,8 +154,11 @@ def _api_attempt(prompt, system, model, effort, json_schema, timeout, max_tokens
     block = {"type": "text", "text": system}
     if cache_system:
         block["cache_control"] = {"type": "ephemeral"}
-    kwargs = {"model": MODEL_ALIASES.get(model, model), "max_tokens": max_tokens or 16000,
+    model_id = MODEL_ALIASES.get(model, model)
+    kwargs = {"model": model_id, "max_tokens": max_tokens or 16000,
               "system": [block], "messages": [{"role": "user", "content": prompt}]}
+    if thinking == "off" and model_id in API_THINKING_OFF and effort not in ("xhigh", "max"):
+        kwargs["thinking"] = API_THINKING_OFF[model_id]
     oc = {}
     if effort:
         oc["effort"] = effort
@@ -163,6 +173,8 @@ def _api_attempt(prompt, system, model, effort, json_schema, timeout, max_tokens
         return {"ok": False, "error_kind": "api", "error": str(e)[:300], "retryable": True,
                 "wall_ms": int((time.time() - t0) * 1000)}
     except anthropic.APIStatusError as e:
+        if any(m in str(e).lower() for m in QUOTA_MARKERS):
+            return {"ok": False, "error_kind": "quota", "error": str(e)[:300], "retryable": False}
         return {"ok": False, "error_kind": "api", "error": f"status={e.status_code} {str(e)[:300]}",
                 "retryable": e.status_code in RETRYABLE_STATUS, "wall_ms": int((time.time() - t0) * 1000)}
     wall_ms = int((time.time() - t0) * 1000)
@@ -183,8 +195,13 @@ def _api_attempt(prompt, system, model, effort, json_schema, timeout, max_tokens
 
 def call(prompt, system=None, *, backend="cli", model="haiku", effort=None, max_tokens=None,
          json_schema=None, expect_json=False, timeout=300, retries=2, cache_system=True,
-         extra_args=None):
-    """Run one model call with retries; always returns a record (never raises)."""
+         thinking="off", extra_args=None):
+    """Run one model call with retries; always returns a record (never raises).
+
+    thinking="off" disables thinking where the api backend allows it (Haiku 5.5, Sonnet 5.5
+    at effort <= high); the cli backend cannot turn adaptive thinking off - use effort "low"
+    and read usage.thinking.
+    """
     system = system or DEFAULT_SYSTEM
     total = _empty_usage()
     any_usage = False
@@ -196,7 +213,8 @@ def call(prompt, system=None, *, backend="cli", model="haiku", effort=None, max_
     for attempt in range(retries + 1):
         attempts += 1
         if backend == "api":
-            rec = _api_attempt(prompt, system, model, effort, json_schema, timeout, max_tokens, cache_system)
+            rec = _api_attempt(prompt, system, model, effort, json_schema, timeout, max_tokens, cache_system,
+                               thinking)
         else:
             rec = _cli_attempt(prompt, system, model, effort, json_schema, timeout, extra_args)
         if rec.get("usage") is not None:
@@ -211,7 +229,7 @@ def call(prompt, system=None, *, backend="cli", model="haiku", effort=None, max_
             time.sleep(min(30, 2 ** (attempt + 1)) * (0.75 + 0.5 * (time.time() % 1)))
     out = {
         "backend": backend, "model_requested": model, "model_served": rec.get("model_served"),
-        "effort": effort, "ok": bool(rec.get("ok")), "error_kind": rec.get("error_kind"),
+        "effort": effort, "thinking": thinking, "ok": bool(rec.get("ok")), "error_kind": rec.get("error_kind"),
         "error": rec.get("error"), "text": rec.get("text"), "structured": rec.get("structured"),
         "stop_reason": rec.get("stop_reason"), "usage": total if any_usage else None,
         "cost_usd": cost if any_usage else None, "cost_basis": rec.get("cost_basis"),
@@ -234,7 +252,7 @@ def call(prompt, system=None, *, backend="cli", model="haiku", effort=None, max_
 
 def is_harness_failure(rec):
     """Infra failures (timeouts, rate limits, CLI crashes) are missing data, not model errors."""
-    return (not rec.get("ok")) and rec.get("error_kind") in ("timeout", "api", "harness")
+    return (not rec.get("ok")) and rec.get("error_kind") in ("timeout", "api", "harness", "quota")
 
 
 def calibrate(backend="cli", model="haiku", n=3):

@@ -4,6 +4,9 @@ load_units(split) -> list of {"id": str, ...}. Splits live in eval/splits.json:
   {"dev": [...ids], "holdout": [...ids], "full": [...ids]}  (+ any named subsets)
 group_of(unit) -> key; units sharing a key must sit in the same split (near-duplicates,
 same source page, same parent product). validate_eval.py checks it.
+Units may be derived: one record can yield several units (e.g. a query with and without its
+true candidate); give them ids like "<record id>#present" and the same group_of key. Put
+constructed inputs under WS/data_built/ with the script that built them.
 
 Make splits once (random, stratified, group-aware - never by baseline score):
   python eval/dataset.py --make-splits --dev 10 --holdout 10 --seed 0
@@ -18,7 +21,7 @@ CHARTER = json.loads((WS / "charter.json").read_text(encoding="utf-8"))
 sys.path.insert(0, str(Path(CHARTER["skill_dir"]) / "scripts"))
 from common import make_splits, read_json, write_json  # noqa: E402
 
-ID_FIELD = "id"  # TODO: field that identifies a unit
+ID_FIELD = "id"  # TODO: field that identifies a record (e.g. "product_pair_id")
 _CACHE = {}
 
 

@@ -39,6 +39,9 @@ class RunLog:
         self.lock = threading.Lock()
         self.calls_path = run_dir / "calls.jsonl"
         self.seq = 0
+        # Circuit breaker: once the subscription/API quota is exhausted, every further call
+        # would fail too - stop spending wall time and mark the rest as harness errors.
+        self.quota_hit = threading.Event()
 
     def call(self, rec):
         with self.lock:
@@ -72,12 +75,18 @@ class Ctx:
     def llm(self, prompt, system=None, *, tag=None, unit_id=None, model=None, effort=None,
             max_tokens=None, json_schema=None, expect_json=False, backend=None):
         c = self.config
+        if self._log.quota_hit.is_set():
+            self.harness_failed = True
+            return {"ok": False, "error_kind": "quota", "error": "skipped: quota exhausted earlier in this run",
+                    "text": None, "json": None, "usage": None, "cost_usd": None}
         with self._sem:
             rec = llm_call.call(
                 prompt, system, backend=backend or c.get("backend", "cli"), model=model or c.get("model", "haiku"),
                 effort=effort if effort is not None else c.get("effort"),
                 max_tokens=max_tokens or c.get("max_tokens"), json_schema=json_schema, expect_json=expect_json,
-                timeout=c.get("timeout_s", 300), retries=c.get("retries", 2))
+                timeout=c.get("timeout_s", 300), retries=c.get("retries", 2), thinking=c.get("thinking", "off"))
+        if rec.get("error_kind") == "quota":
+            self._log.quota_hit.set()
         self.n_calls += 1
         if llm_call.is_harness_failure(rec):
             self.harness_failed = True
@@ -177,8 +186,28 @@ def _summarize(units, rows, calls, score, wall_s, concurrency):
         "retries": sum(max(0, (c.get("attempts") or 1) - 1) for c in calls),
         "call_errors": errors,
         "models_served": sorted({c.get("model_served") for c in calls if c.get("model_served")}),
-        "output_tokens_p90": percentile([(c.get("usage") or {}).get("output") for c in calls], .9),
+        "ai_free": len(calls) == 0,
+        "per_call": _per_call_dist(calls),
     }
+
+
+def _per_call_dist(calls):
+    """Distributions used to recommend production settings (max_tokens, timeout)."""
+    outs = [(c.get("usage") or {}).get("output") for c in calls]
+    think = [(c.get("usage") or {}).get("thinking") for c in calls]
+    ins = [((c.get("usage") or {}).get("input") or 0) + ((c.get("usage") or {}).get("cache_read") or 0)
+           + ((c.get("usage") or {}).get("cache_write") or 0) for c in calls if c.get("usage")]
+    api = [c.get("api_ms") for c in calls]
+    stops = {}
+    for c in calls:
+        stops[str(c.get("stop_reason"))] = stops.get(str(c.get("stop_reason")), 0) + 1
+
+    def d(v):
+        v = [x for x in v if x is not None]
+        return {"p50": percentile(v, .5), "p95": percentile(v, .95), "p99": percentile(v, .99),
+                "max": max(v) if v else None} if v else None
+    return {"output_tokens": d(outs), "thinking_tokens": d(think), "input_side_tokens": d(ins),
+            "api_ms": d(api), "stop_reasons": stops}
 
 
 def _print_summary(run_id, s, holdout):
@@ -276,6 +305,9 @@ def run(ws, candidate, split, purpose, exp=None, limit=None, concurrency=None, t
                          "wall_ms": None, "n_calls": None, "notes": {}, "counts": {}})
     else:
         def work(u):
+            if log.quota_hit.is_set():
+                return {"id": u["id"], "status": "harness_error", "error": "skipped: quota exhausted",
+                        "output": None, "wall_ms": None, "n_calls": 0, "notes": {}, "counts": {}}
             ctx = Ctx(cand_dir, config, log, sem, unit_id=u["id"])
             ctx.state = shared.state
             ts = time.time()
@@ -301,11 +333,15 @@ def run(ws, candidate, split, purpose, exp=None, limit=None, concurrency=None, t
         for k, v in (r.get("counts") or {}).items():
             counts[k] = counts.get(k, 0) + v
     summary["pipeline_counts"] = counts
+    summary["quota_exhausted"] = log.quota_hit.is_set()
     write_json(run_dir / "summary.json", summary)
     meta["ended"] = now_iso()
     write_json(run_dir / "meta.json", meta)
     _print_summary(run_id, summary, purpose == "holdout")
     print(f"  dir={run_dir}")
+    if summary["quota_exhausted"]:
+        print("  QUOTA EXHAUSTED: this run is incomplete (it will be void). Stop launching runs, record "
+              "`ledger.py clock WS pause`, and resume after the quota resets.")
     return run_dir
 
 

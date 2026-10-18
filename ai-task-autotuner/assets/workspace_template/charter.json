@@ -6,13 +6,15 @@
   "skill_dir": "",
   "data": {
     "inputs": [],
+    "aux": [],
     "scope_notes": "what is in scope, what is excluded and why (counts against the original totals)"
   },
   "backend": {
     "backend": "cli",
     "model": "haiku",
     "effort": "low",
-    "concurrency": 8,
+    "thinking": "off",
+    "concurrency": 6,
     "timeout_s": 300,
     "retries": 2
   },
@@ -40,7 +42,7 @@
   "loop": {
     "patience": 5,
     "min_delta": null,
-    "min_efficiency_gain": 0.10,
+    "min_efficiency_gain": 0.1,
     "max_holdout_evals": 3
   },
   "phase": "quality",

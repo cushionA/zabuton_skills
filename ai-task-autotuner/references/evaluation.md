@@ -14,7 +14,7 @@ that must not get worse.
 | Classification | accuracy or macro-F1 (skewed classes) | per-class recall, majority-class baseline |
 | Extraction | field-level exact match after normalization | missing-field rate, fabricated-value rate |
 | Matching / reconciliation with "no match" and "unsure" | correct-decision rate over all items | false-accept (wrong match) rate, auto-decided coverage, precision of decided items |
-| Retrieval / selection among candidates | top-1 correct incl. correct "none" | false-positive rate on no-answer queries, recall@k of any pre-filter |
+| Retrieval / selection among candidates | top-1 correct incl. correct "none" | false-positive rate on no-answer queries, recall@k of any pre-filter; report present vs removed queries separately |
 | Ranking | NDCG@k / pairwise accuracy | top-1 |
 | Generation / summarization | rubric pass rate from a validated judge | length, faithfulness flags, cost |
 
@@ -56,8 +56,11 @@ loop learns to guess. Report coverage (share auto-decided) separately; it is not
 
 ### Silver protocol (no labels)
 
-1. Reference model = stronger than the target (default `opus`, effort high). Never the target
-   model, never the candidate you are tuning - agreement would then measure self-similarity.
+1. Reference model = stronger than the target (default `opus`, effort high; `sonnet` when the
+   budget or quota is tight). Never the target model, never the candidate you are tuning -
+   agreement would then measure self-similarity. Price it first: smoke one unit, extrapolate to
+   2 runs x (dev + holdout), and tell the user if it is large - strong-model runs share the
+   subscription quota with this session and can stop everything for hours.
 2. Write a careful reference candidate (`candidates/ref-*`): full instructions, per-item
    evidence, no cost cutting. Optionally two different prompt variants to decorrelate errors.
 3. Run it twice on dev and holdout (`--purpose reference`), then

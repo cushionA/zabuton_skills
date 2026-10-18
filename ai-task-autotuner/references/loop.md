@@ -129,7 +129,10 @@ In priority order:
 2. User targets met (quality, then efficiency if set) - finalize.
 3. No limits given: stop when the efficiency phase plateaus (same plateau rule) - this is the
    improvement limit. Also stop on repeated infrastructure failure you cannot fix (report it).
-4. Never stop silently: `ledger.py stop WS --reason "..."`, then finalize.
+4. Quota exhausted (the runner prints QUOTA EXHAUSTED and the run is void): `ledger.py clock WS
+   pause --reason quota`, write the state, and resume after the reset with `clock resume` and a
+   rerun of the void experiment. Time limits count active time only.
+5. Never stop silently: `ledger.py stop WS --reason "..."`, then finalize.
 
 ## Finalize
 
@@ -139,7 +142,9 @@ In priority order:
 2. Consistency: 3 runs of the best on dev (`--tag r1..r3`), `analyze_run.py --consistency`
    for pass^k and flaky items.
 3. Full-scope run (`--split full --purpose full`) for time, usage and outcome distribution.
-4. Write the report (report.md).
+4. `export_deliverables.py WS --candidate <best> --runs <full run> <holdout run>` for the
+   measured production settings; write `task_design.md` (task-design.md) and the report
+   (report.md); re-run export so they are copied in.
 
 ## Journal (`journal.md`)
 

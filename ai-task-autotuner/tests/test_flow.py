@@ -70,6 +70,10 @@ class FlowTest(unittest.TestCase):
         (self.ws / "audit" / "checks.py").write_text(CHECKS, encoding="utf-8")
         self.run_py("profile_data.py", str(data), "--out", str(self.ws / "audit" / "profile"))
         (self.ws / "audit" / "data_audit.md").write_text("toy audit\n", encoding="utf-8")
+        # without a close read the audit is INCOMPLETE (exit 5), not a user-facing stop
+        r = self.run_py("quality_gate.py", str(self.ws), ok=(5,))
+        self.assertIn("GATE INCOMPLETE", r.stdout)
+        common.append_jsonl(self.ws / "audit" / "close_read.jsonl", {"id": "u00", "verdict": "ok", "evidence": "fine"})
         # reference: fine-* is positive
         ref = self.ws / "eval" / "reference"
         for split, ids in (("dev", range(0, 6)), ("holdout", range(6, 12))):
@@ -160,6 +164,25 @@ class FlowTest(unittest.TestCase):
         self.assertIn("NOVELTY CHECK FAILED", r.stdout)
         st = self.run_py("ledger.py", "status", str(self.ws), "--write")
         self.assertIn("RECOMMEND", st.stdout)
+        self.assertIn("NO-LLM best E001", st.stdout)
+        h = self.run_py("ledger.py", "history", str(self.ws))
+        self.assertIn("| E002 | model.choice |", h.stdout)
+        ex = self.run_py("export_deliverables.py", str(self.ws), "--candidate", "c002-llm")
+        cfg = common.read_json(self.ws / "deliverables" / "production_config.json")
+        self.assertEqual(cfg["settings"]["max_tokens"]["value"], 512)
+        self.assertTrue((self.ws / "deliverables" / "pipeline" / "pipeline.py").exists())
+        self.assertIn("missing", ex.stdout)  # task_design.md / report.md not written yet
+        # a defect found on close reading turns the gate into REVIEW, pauses the clock, blocks runs
+        common.append_jsonl(self.ws / "audit" / "close_read.jsonl",
+                            {"id": "u03", "verdict": "defect", "evidence": "label contradicts text"})
+        self.run_py("quality_gate.py", str(self.ws), ok=(2,))
+        st = self.run_py("ledger.py", "status", str(self.ws))
+        self.assertIn("RECOMMEND WAIT_USER", st.stdout)
+        self.assertIn("clock paused", st.stdout)
+        with self.assertRaises(SystemExit):
+            self.quiet(run_experiment.run, self.ws, "c001-rule", "dev", "smoke")
+        self.run_py("quality_gate.py", str(self.ws), "--accept-review", "user: score u03 as-is")
+        self.assertNotIn("clock paused", self.run_py("ledger.py", "status", str(self.ws)).stdout)
         self.assertTrue((self.ws / "STATE.md").exists())
         a = self.run_py("analyze_run.py", str(r3), "--compare", str(r1))
         self.assertIn("improved", a.stdout)
@@ -170,6 +193,26 @@ class FlowTest(unittest.TestCase):
             self.quiet(run_experiment.run, self.ws, "c001-rule", "dev", "smoke")
 
 
+def quota_call(prompt, system=None, **kw):
+    return {"ok": False, "error_kind": "quota", "error": "quota exhausted: You've hit your session limit",
+            "text": None, "json": None, "usage": None, "cost_usd": None, "attempts": 1}
+
+
+class QuotaTest(FlowTest):
+    def test_quota_stops_run(self):
+        self.run_py("quality_gate.py", str(self.ws))
+        with mock.patch.object(llm_call, "call", side_effect=quota_call) as m:
+            r, out = self.quiet(run_experiment.run, self.ws, "c002-llm", "dev", "smoke", concurrency=1)
+        s = common.read_json(r / "summary.json")
+        self.assertTrue(s["quota_exhausted"])
+        self.assertEqual(m.call_count, 1)  # circuit breaker: no further calls after the first quota error
+        self.assertEqual(s["status"], {"harness_error": 6})
+        self.assertIn("QUOTA EXHAUSTED", out)
+
+    def test_full_flow(self):
+        pass
+
+
 class DiversifyTest(unittest.TestCase):
     def test_recommendations(self):
         tmp = Path(tempfile.mkdtemp())
@@ -177,6 +220,7 @@ class DiversifyTest(unittest.TestCase):
             ws = tmp / "ws"
             ws.mkdir()
             common.write_json(ws / "charter.json", {"phase": "quality", "loop": {"patience": 5}})
+            common.write_json(ws / "audit" / "quality_gate.json", {"status": "PASS", "findings": []})
             rows = [{"event": "propose", "exp": "E001", "lever": "baseline", "candidate": "c0"},
                     {"event": "decide", "exp": "E001", "decision": "baseline", "phase": "quality", "at": "1",
                      "primary": 0.5, "candidate": "c0"}]
