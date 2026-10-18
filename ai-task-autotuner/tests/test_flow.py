@@ -186,6 +186,13 @@ class FlowTest(unittest.TestCase):
         self.assertTrue((self.ws / "STATE.md").exists())
         a = self.run_py("analyze_run.py", str(r3), "--compare", str(r1))
         self.assertIn("improved", a.stdout)
+        # moving the data elsewhere: relocate rewrites charter + gate keys, hashes still verify
+        moved = self.tmp / "moved"
+        moved.mkdir()
+        old = common.read_json(self.ws / "charter.json")["data"]["inputs"][0]
+        shutil.copy2(old, moved / "data.jsonl")
+        self.run_py("relocate_workspace.py", str(self.ws), "--data-map", f"{old}={moved / 'data.jsonl'}")
+        self.assertIn("data unchanged", self.run_py("quality_gate.py", str(self.ws), "--verify").stdout)
         # input data change invalidates the gate
         with open(common.read_json(self.ws / "charter.json")["data"]["inputs"][0], "a", encoding="utf-8") as f:
             f.write('{"id": "u99", "item_keys": []}\n')
