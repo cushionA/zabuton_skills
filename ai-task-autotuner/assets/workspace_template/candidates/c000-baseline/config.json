@@ -1,0 +1,7 @@
+{
+  "model": "haiku",
+  "effort": "low",
+  "max_tokens": 16000,
+  "concurrency": 8,
+  "params": {}
+}

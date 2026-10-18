@@ -1,0 +1,19 @@
+{
+  "skill_name": "ai-task-autotuner",
+  "evals": [
+    {
+      "id": 1,
+      "name": "sku-matching-no-labels",
+      "prompt": "添付データ（DATA_DIR）を使って、楽天→au PAYマーケットのSKU突合をするAIタスクを設計して、実測しながら改善して。APIはclaude -pで代用、モデルはhaiku。データの案内文はBRIEF_PATHに置いた。ボリュームテスト版じゃなくて通常使用版を使うこと（au_only_stressは使わない）。停止条件は特にないので、改善の限界まで回して。データに問題があれば動く前に報告して。",
+      "expected_output": "Data audit with gate before any model call (duplicate Rakuten products across pairs, unverified pairs, no labels as known limitation); experiment plan; reference built with a stronger model and labelled as such; baseline x2 and validation; several experiments with keep/discard by noise; efficiency phase; stops at plateau; holdout; Japanese report covering the 5 reporting items without calling agreement accuracy.",
+      "files": ["DATA_DIR", "BRIEF_PATH"]
+    },
+    {
+      "id": 2,
+      "name": "au-to-rakuten-product-identification",
+      "prompt": "同じデータ（DATA_DIR）を応用して、au PAYマーケットの商品1件を入力に、楽天側の複数の商品候補の中から同一商品を特定する（同一商品がなければ「該当なし」）AIタスクを作って最適化して。正解には商品ペアの対応情報を使っていい。モデルはhaiku（claude -p）。予算は合計$3、時間は2時間まで。データに問題があれば動く前に報告して。",
+      "expected_output": "Audit notices that pair labels are unverified and that several Rakuten products appear in multiple pairs / near-duplicate titles (ambiguous gold), handles them (acceptable sets or grouping) or reports before running; designs candidate pools incl. no-match cases; metrics with false-positive guard; respects $3 / 2h limits; efficiency phase uses deterministic pre-filtering; holdout; Japanese report.",
+      "files": ["DATA_DIR"]
+    }
+  ]
+}
