@@ -11,6 +11,7 @@
 | [scraping-procedure-deck](scraping-procedure-deck/) | Webの操作・取得手順を、編集可能な赤枠・番号とデータレイアウト表付きのPowerPoint資料にする | Python / Playwright、描画はPowerPointまたはLibreOffice |
 | [simple-plan-auditor](simple-plan-auditor/) | 作業計画の抜け、今必要な判断、根拠・確認方法、着手できる範囲を整理する | Claude Web・デスクトップ / Claude Code |
 | [simple-plan-auditor-en](simple-plan-auditor-en/) | Simple Plan Auditor の英語版。英語のPlanを同じ考え方で整理・監査する | 全OS |
+| [ai-task-autotuner](ai-task-autotuner/) | テストデータからAIタスク（分類・抽出・突合・検索など）を設計し、データ監査→固定評価→実測の採用／破棄ループで精度、次に効率を自律改善する | Claude Code（`claude -p`）、Python 3.10+ |
 
 ## 使い方
 
@@ -108,6 +109,41 @@ python -X utf8 -B -m unittest discover -s scraping-procedure-deck/evals -p "test
 - 撮影倍率1.5でPNG実寸と記録寸法に高さ1pxの差が出る。
 
 評価用モック・テストコードは同梱する。生成PPTX・キャプチャ・ログは公開しない。`evals/files/generated/` は除外設定済みだが、任意の作業ディレクトリは利用者側で公開対象から外す。
+
+## AI Task Autotuner
+
+テストデータとタスクの目的を渡すと、AI（API想定）を使う処理を設計し、実測しながら自律的に改善し続ける。`claude -p` をAPIの代わりに使い、既定のモデルは Haiku（思考は最小）。
+
+- **データ監査が先:** 件数・重複・キー・欠損・正解の出所・近道（答えが入力に漏れていないか）を計算し、精読結果と合わせて PASS / REVIEW / STOP を判定する。REVIEW / STOP なら実験を始めずに報告して止まる。
+- **評価は固定:** 採点器・参照・データ分割は実験中に変えない。正解ラベルがなければ強いモデルで参照を作り、「正答率」ではなく「参照との一致率」と呼ぶ。最終評価用データは調整に使わない。
+- **改善ループ:** 1実験＝1仮説を事前登録し、揺らぎ（ベースライン2回の差）を超えた改善だけ採用する。精度が頭打ちになったら、品質下限を守ったまま費用・速度・タスク構造を改善する。同じ方向の試行が続くと別の手段へ切り替えさせ、行き詰まったら過去の経緯を見せない新しい視点で案を出させる。
+- **AI以外も使う:** 正規化・ルール・候補絞り込みなどのコード処理をパイプラインに組み込み、AIなしの案も必ず測る。コードだけで足りると分かれば別枠で報告する。
+- **停止条件:** ユーザー指定の目標・費用・時間・回数を優先し、指定がなければ改善の限界で止まる。時間はユーザーの返答待ちや利用上限による停止を除いて数える。
+- **成果物:** タスク設計書、最終パイプラインとプロンプト、本番向け設定（出力トークン上限・タイムアウト・同時実行数・思考設定・単価見込みを実測から算出）、テストデータ一式、再測定用の評価キット、報告書。
+
+依頼の例（Claude Code）:
+
+> このデータ（inputs/products.jsonl）で、楽天とauのSKU突合をするAIタスクを設計して実測で改善して。モデルはhaiku、予算は$3まで。データに問題があれば動く前に報告して。
+
+作業フォルダはリポジトリの外に作る。主なコマンド（スキルが手順どおり実行する）:
+
+```powershell
+python ai-task-autotuner/scripts/init_workspace.py work/ws --task "sku-matching" --data <入力ファイル>
+python ai-task-autotuner/scripts/llm_call.py --calibrate
+python ai-task-autotuner/scripts/ledger.py status work/ws
+```
+
+注意点:
+
+- `claude -p` の呼び出しは、スキルを動かしている Claude Code と同じサブスクリプションの利用枠を消費する。強いモデル（Opus）で参照を作る処理や並列実行は短時間で上限に達しやすい。上限に達した実行は自動で打ち切られ、時間の計測も止まる。
+- `claude -p` では Haiku の思考を完全には無効化できない（effort low で最小化し、思考トークンを記録する）。実API（`backend: api`、`anthropic` SDK と認証情報が必要）なら思考を無効化できる。実API経路はライブ検証していないため、最初に1件だけ試すこと。
+- スクリプトは Python 標準ライブラリのみ。Windows でも動くよう、プロンプトは標準入力、システムプロンプトはファイルで渡す。
+
+[スキルの指示](ai-task-autotuner/SKILL.md) / [データ監査](ai-task-autotuner/references/audit.md) / [評価設計](ai-task-autotuner/references/evaluation.md) / [改善ループ](ai-task-autotuner/references/loop.md) / [タスク設計](ai-task-autotuner/references/task-design.md)
+
+```powershell
+python -B -m unittest discover -s ai-task-autotuner/tests
+```
 
 ## リポジトリに入れないもの
 
