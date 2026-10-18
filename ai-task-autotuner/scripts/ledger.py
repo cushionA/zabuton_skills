@@ -8,7 +8,7 @@ and anti-dead-end steering. State lives in WS/ledger.jsonl; `status` is the resu
   python ledger.py compare WS RUN_A RUN_B       # paired item comparison
   python ledger.py mark WS fresh-eyes "what the fresh look found"   # or: categorize, headroom
   python ledger.py phase WS efficiency [--floor 0.82] --reason "..."
-  python ledger.py clock WS pause|resume --reason "waiting for the user"   # time limits count active time
+  python ledger.py clock WS pause|resume --reason "waiting for the user" [--at ISO]  # limits count active time
   python ledger.py history WS                  # markdown table of all experiments for the report
   python ledger.py stop WS --reason "..."
 
@@ -23,6 +23,7 @@ import json
 import os
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -251,17 +252,27 @@ def decide(ws, exp, split="dev", override=None, reason=None):
     print_status(ws, compact=True)
 
 
+def _epoch(row):
+    if row.get("epoch") is not None:
+        return float(row["epoch"])
+    at = str(row.get("at", ""))
+    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M%z", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%MZ"):
+        try:
+            return datetime.strptime(at, fmt).timestamp()
+        except ValueError:
+            continue
+    return time.time()
+
+
 def active_hours(ws, ch):
-    """Hours since the workspace was created, minus time paused while waiting for the user."""
+    """Hours since the workspace was created, minus time paused (waiting for the user, quota outages)."""
     created = ch.get("created_epoch") or time.time()
     paused, since = 0.0, None
-    for r in ledger_rows(ws):
-        if r.get("event") != "clock":
-            continue
+    for r in sorted((r for r in ledger_rows(ws) if r.get("event") == "clock"), key=_epoch):
         if r["action"] == "pause" and since is None:
-            since = r.get("epoch", time.time())
+            since = _epoch(r)
         elif r["action"] == "resume" and since is not None:
-            paused += r.get("epoch", time.time()) - since
+            paused += _epoch(r) - since
             since = None
     if since is not None:
         paused += time.time() - since
@@ -493,6 +504,9 @@ def main():
     cl.add_argument("ws")
     cl.add_argument("action", choices=["pause", "resume"])
     cl.add_argument("--reason", default="")
+    cl.add_argument("--at", help="backdate, ISO time with zone (e.g. 2026-10-18T10:52:00+0000) for outages noticed later")
+    cl.add_argument("--gap", action="store_true",
+                    help="with resume: treat the time since the last file change in WS as an outage (session died)")
     hi = sub.add_parser("history")
     hi.add_argument("ws")
     sp = sub.add_parser("stop")
@@ -527,11 +541,21 @@ def main():
     elif a.cmd == "clock":
         rows = [r for r in ledger_rows(a.ws) if r.get("event") == "clock"]
         state = rows[-1]["action"] if rows else "resume"
+        if a.action == "resume" and a.gap and state != "pause":
+            last = max((f.stat().st_mtime for f in Path(a.ws).rglob("*")
+                        if f.is_file() and f.name != "STATE.md"), default=time.time())
+            if time.time() - last > 600:
+                append_jsonl(Path(a.ws) / "ledger.jsonl", {
+                    "event": "clock", "action": "pause", "reason": "outage: no activity (session interrupted)",
+                    "at": datetime.fromtimestamp(last).astimezone().strftime("%Y-%m-%dT%H:%M:%S%z"), "epoch": last})
+                state = "pause"
+                print(f"recorded outage since {datetime.fromtimestamp(last).astimezone().isoformat(timespec='minutes')}")
         if state == a.action:
             print(f"clock already {a.action}d")
         else:
-            append_jsonl(Path(a.ws) / "ledger.jsonl", {"event": "clock", "action": a.action, "reason": a.reason,
-                                                       "at": now_iso(), "epoch": time.time()})
+            row = {"event": "clock", "action": a.action, "reason": a.reason, "at": a.at or now_iso()}
+            row["epoch"] = _epoch(row) if a.at else time.time()
+            append_jsonl(Path(a.ws) / "ledger.jsonl", row)
             print(f"clock {a.action}d")
     elif a.cmd == "history":
         cmd_history(a.ws)

@@ -129,9 +129,11 @@ In priority order:
 2. User targets met (quality, then efficiency if set) - finalize.
 3. No limits given: stop when the efficiency phase plateaus (same plateau rule) - this is the
    improvement limit. Also stop on repeated infrastructure failure you cannot fix (report it).
-4. Quota exhausted (the runner prints QUOTA EXHAUSTED and the run is void): `ledger.py clock WS
-   pause --reason quota`, write the state, and resume after the reset with `clock resume` and a
-   rerun of the void experiment. Time limits count active time only.
+4. Quota exhausted (the runner prints QUOTA EXHAUSTED, pauses the clock, and the run is void):
+   write the state and stop; after the reset `ledger.py clock WS resume` and rerun the void
+   experiment. If your own session was cut off (quota, crash), start the resumed session with
+   `ledger.py clock WS resume --gap` - it books the silent gap as an outage. Time limits count
+   active time only.
 5. Never stop silently: `ledger.py stop WS --reason "..."`, then finalize.
 
 ## Finalize

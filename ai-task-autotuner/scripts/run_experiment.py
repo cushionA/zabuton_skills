@@ -340,8 +340,12 @@ def run(ws, candidate, split, purpose, exp=None, limit=None, concurrency=None, t
     _print_summary(run_id, summary, purpose == "holdout")
     print(f"  dir={run_dir}")
     if summary["quota_exhausted"]:
-        print("  QUOTA EXHAUSTED: this run is incomplete (it will be void). Stop launching runs, record "
-              "`ledger.py clock WS pause`, and resume after the quota resets.")
+        clock = [r for r in read_jsonl(ws / "ledger.jsonl") if r.get("event") == "clock"]
+        if not clock or clock[-1].get("action") != "pause":
+            append_jsonl(ws / "ledger.jsonl", {"event": "clock", "action": "pause", "at": now_iso(),
+                                               "epoch": time.time(), "reason": "quota exhausted (runner)"})
+        print("  QUOTA EXHAUSTED: this run is incomplete (it will be void); the time-limit clock is paused. "
+              "Stop launching runs and resume after the quota resets (`ledger.py clock WS resume`).")
     return run_dir
 
 
