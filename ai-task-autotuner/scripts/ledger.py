@@ -21,6 +21,7 @@ Levers (use the group.detail form; groups drive the diversity rules):
 """
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -28,8 +29,11 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import append_jsonl, mean, now_iso, paired_items, read_json, text_similarity, write_json  # noqa: E402
-from workspace import charter as load_charter, eval_hash, ledger_rows, list_runs  # noqa: E402
+from common import append_jsonl, now_iso, paired_items, read_json, text_similarity, write_json  # noqa: E402
+from workspace import (candidate_hash, charter as load_charter, data_fingerprint, effective_config_fingerprint,
+                       eval_hash, ledger_rows, list_runs)  # noqa: E402
+from task_review import task_review_allows_runs  # noqa: E402
+from run_policy import active_hours as policy_active_hours, limit_state  # noqa: E402
 
 LEVER_GROUPS = ["prompt", "input", "output", "decomposition", "deterministic", "model", "ensemble",
                 "context", "simplify", "harness"]
@@ -42,10 +46,30 @@ def _get(d, dotted):
         if not isinstance(cur, dict):
             return None
         cur = cur.get(part)
-    if cur is None and dotted.endswith("_per_unit") and isinstance(d, dict) and d.get("units"):
+    if cur is None and dotted.endswith("_per_unit") and isinstance(d, dict):
         total = d.get(dotted[: -len("_per_unit")])  # runs measured before the metric existed
-        cur = total / d["units"] if isinstance(total, (int, float)) else None
+        units = d.get("units")
+        cur = total / units if _finite(total) and _finite(units) and units > 0 else None
     return cur
+
+
+def _finite(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _complete_mean(values, *, nonnegative=False):
+    """An unknown repeat cannot become a measured zero or disappear from the average."""
+    if not values or any(not _finite(v) or (nonnegative and v < 0) for v in values):
+        return None
+    return sum(values) / len(values)
+
+
+def _efficiency_ratio(candidate, baseline):
+    if not _finite(candidate) or not _finite(baseline) or candidate < 0 or baseline < 0:
+        return None
+    if baseline == 0:
+        return 1.0 if candidate == 0 else None  # a positive cost cannot improve on free
+    return candidate / baseline
 
 
 def _state(ws):
@@ -82,37 +106,67 @@ def _next_exp_id(props):
 
 
 def _exp_runs(ws, exp, split):
+    ws = Path(ws)
     eh = eval_hash(ws)
-    voided = {r["run"] for r in ledger_rows(ws) if r.get("event") == "void_run"}
+    dh = data_fingerprint(ws)
+    rows = ledger_rows(ws)
+    prop = next((r for r in reversed(rows) if r.get("event") == "propose" and r.get("exp") == exp), None)
+    if not prop:
+        return []
+    candidate = prop.get("candidate")
+    cand_dir = ws / "candidates" / str(candidate)
+    valid_path = isinstance(candidate, str) and candidate not in ("", ".", "..") and "/" not in candidate and "\\" not in candidate
+    current_hash = candidate_hash(cand_dir) if valid_path and (cand_dir / "pipeline.py").is_file() else None
+    voided = {r["run"] for r in rows if r.get("event") == "void_run"}
     out = []
     for m in list_runs(ws):
-        if m["run_id"] in voided or m["_summary"].get("quota_exhausted"):
+        if m["run_id"] in voided or any(m["_summary"].get(flag) for flag in
+                                       ("quota_exhausted", "policy_exhausted", "data_changed")):
             continue  # infra-broken runs never enter a decision
         if m.get("exp") == exp and m.get("split") == split and m.get("purpose") in ("experiment", "baseline", "confirm"):
             if m.get("limit"):
                 continue  # partial runs never count
-            items = read_json(Path(m["_dir"]) / "score.json", {}).get("items", [])
-            out.append({"run_id": m["run_id"], "summary": m["_summary"], "items": items,
-                        "stale": m.get("eval_hash") != eh})
+            score = read_json(Path(m["_dir"]) / "score.json", {})
+            invalid = []
+            if m.get("candidate") != candidate:
+                invalid.append(f"candidate {m.get('candidate')!r} does not match proposal {candidate!r}")
+            if current_hash is None or m.get("candidate_hash") != current_hash:
+                invalid.append("candidate content differs from the measured candidate hash")
+            if score.get("eval_hash") != m.get("eval_hash"):
+                invalid.append("score and run metadata have different eval hashes")
+            config_hash = effective_config_fingerprint(m.get("config"))
+            if config_hash is None:
+                invalid.append("effective execution config is missing or unresolved")
+            elif m.get("config_hash") not in (None, config_hash):
+                invalid.append("effective execution config differs from its recorded hash")
+            out.append({"run_id": m["run_id"], "summary": m["_summary"], "items": score.get("items", []),
+                        "invalid": invalid, "config_hash": config_hash,
+                        "stale": bool(invalid) or m.get("eval_hash") != eh or m.get("data_hash") != dh})
+    if len({r["config_hash"] for r in out if r["config_hash"] is not None}) > 1:
+        for run in out:
+            run["invalid"].append("experiment repeats have different effective execution configs")
+            run["stale"] = True
     return out
 
 
 def _pool(runs, eff_metric):
     """Average several runs of one experiment (repeats tighten the estimate)."""
-    acc = {}
+    acc, units = {}, {}
     for r in runs:
         for it in r["items"]:
-            acc.setdefault(it["id"], []).append(it.get("score", 0.0))
-    items = [{"id": k, "score": sum(v) / len(v)} for k, v in acc.items()]
-    metrics = {}
-    for r in runs:
-        for k, v in (r["summary"].get("metrics") or {}).items():
-            if isinstance(v, (int, float)):
-                metrics.setdefault(k, []).append(v)
+            key = it["id"]
+            unit = it.get("unit") or key  # legacy scorers: each item is its own unit
+            if key in units and units[key] != unit:
+                raise ValueError(f"conflicting units for item {key!r}: {units[key]!r} != {unit!r}")
+            units[key] = unit
+            acc.setdefault(key, []).append(it.get("score", 0.0))
+    items = [{"id": k, "unit": units[k], "score": sum(v) / len(v)} for k, v in acc.items()]
+    metric_names = {k for r in runs for k in (r["summary"].get("metrics") or {})}
     return {
-        "primary": mean([r["summary"].get("primary") for r in runs]),
-        "metrics": {k: mean(v) for k, v in metrics.items()},
-        "eff": mean([_get(r["summary"], eff_metric) for r in runs]),
+        "primary": _complete_mean([r["summary"].get("primary") for r in runs]),
+        "metrics": {k: _complete_mean([(r["summary"].get("metrics") or {}).get(k) for r in runs])
+                    for k in metric_names},
+        "eff": _complete_mean([_get(r["summary"], eff_metric) for r in runs], nonnegative=True),
         "harness": max(r["summary"].get("harness_error_rate", 0) for r in runs),
         "gate_failures": sum(r["summary"].get("gate_failures", 0) for r in runs),
         "items": items, "n_runs": len(runs), "runs": [r["run_id"] for r in runs],
@@ -129,6 +183,8 @@ def current_value(ws, decision, split="dev", eff_metric=None):
     if not runs or any(r["stale"] for r in runs):
         return decision.get("primary"), decision.get("eff"), True
     p = _pool(runs, eff_metric or decision.get("eff_metric") or "cost_usd_per_unit")
+    if p["primary"] is None:
+        return decision.get("primary"), decision.get("eff"), True
     return p["primary"], p["eff"], False
 
 
@@ -156,6 +212,10 @@ def cmd_propose(a):
     ws = Path(a.ws)
     st = _state(ws)
     ch = load_charter(ws)
+    limits = _limits(ws, ch)
+    cap = limits["limits"].get("max_experiments")
+    if cap is not None and limits["n_exp"] >= cap:
+        sys.exit(f"REFUSED: max_experiments {cap} already reserved; finish the registered experiments and finalize")
     if not (ws / "candidates" / a.candidate / "pipeline.py").exists():
         sys.exit(f"candidate {a.candidate} not found under candidates/")
     group = a.lever.split(".")[0]
@@ -197,9 +257,14 @@ def decide(ws, exp, split="dev", override=None, reason=None):
     runs = _exp_runs(ws, exp, split)
     if not runs:
         sys.exit(f"no complete runs for {exp} on {split}")
+    invalid = [f"{r['run_id']}: {'; '.join(r['invalid'])}" for r in runs if r.get("invalid")]
+    if invalid:
+        sys.exit("run attribution invalid - restore the measured candidate or void and rerun: " + " | ".join(invalid))
     if any(r["stale"] for r in runs):
         sys.exit("some runs were scored with an older eval - rescore them (run_experiment.py --rescore)")
     cand = _pool(runs, eff_metric)
+    if cand["primary"] is None:
+        sys.exit("primary is missing or nonfinite in one or more runs; repair the measurements first")
     best = st["best"]
     out = {"event": "decide", "exp": exp, "at": now_iso(), "split": split, "phase": ch.get("phase", "quality"),
            "candidate": prop["candidate"], "lever": prop.get("lever"), "runs": cand["runs"],
@@ -208,9 +273,13 @@ def decide(ws, exp, split="dev", override=None, reason=None):
     best_pool = None
     if best:
         best_runs = _exp_runs(ws, best["exp"], split)
+        if any(r.get("invalid") for r in best_runs):
+            sys.exit(f"best {best['exp']} has invalid run attribution; restore the measured candidate or void and rerun")
         if not best_runs or any(r["stale"] for r in best_runs):
             sys.exit(f"best {best['exp']} has no current-eval runs on {split}; rescore it first")
         best_pool = _pool(best_runs, eff_metric)
+        if best_pool["primary"] is None:
+            sys.exit(f"best {best['exp']} has missing or nonfinite primary measurements; repair them first")
     n_items = len(cand["items"]) or 1
     noise = ch.get("noise") or {}
     min_delta = loop.get("min_delta") or noise.get("min_delta") or 1.0 / n_items
@@ -222,7 +291,7 @@ def decide(ws, exp, split="dev", override=None, reason=None):
     else:
         pi = paired_items(best_pool["items"], cand["items"])
         delta = direction * (cand["primary"] - best_pool["primary"])
-        eff_ratio = (cand["eff"] / best_pool["eff"]) if (cand["eff"] and best_pool["eff"]) else None
+        eff_ratio = _efficiency_ratio(cand["eff"], best_pool["eff"])
         out.update(delta=delta, min_delta=min_delta,
                    paired={k: pi[k] for k in ("n", "units", "improved", "regressed", "units_improved",
                                               "units_regressed", "band", "ci", "p")},
@@ -246,7 +315,7 @@ def decide(ws, exp, split="dev", override=None, reason=None):
                 near_floor = floor is not None and direction * (cand["primary"] - floor) < min_delta / 2
                 decision = "rerun" if (near_floor and cand["n_runs"] < 2) else "keep"
                 why = f"{eff_metric} -{gain:.0%} with primary held" + (" (near floor: confirm with a repeat)" if decision == "rerun" else "")
-            elif delta >= min_delta and (gain is None or gain > -0.05) and pi["improved"] > pi["regressed"]:
+            elif delta >= min_delta and gain is not None and gain > -0.05 and pi["improved"] > pi["regressed"]:
                 decision = "rerun" if marginal else "keep"
                 why = f"primary +{delta:.4f} at equal cost"
             else:
@@ -290,37 +359,11 @@ def _epoch(row):
 
 def active_hours(ws, ch):
     """Hours since the workspace was created, minus time paused (waiting for the user, quota outages)."""
-    created = ch.get("created_epoch") or time.time()
-    paused, since = 0.0, None
-    for r in sorted((r for r in ledger_rows(ws) if r.get("event") == "clock"), key=_epoch):
-        if r["action"] == "pause" and since is None:
-            since = _epoch(r)
-        elif r["action"] == "resume" and since is not None:
-            paused += _epoch(r) - since
-            since = None
-    if since is not None:
-        paused += time.time() - since
-    return (time.time() - created - paused) / 3600, since is not None
+    return policy_active_hours(ws, ch)
 
 
 def _limits(ws, ch):
-    runs = list_runs(ws)
-    spent = sum((m["_summary"].get("cost_usd") or 0) for m in runs)
-    hours, paused = active_hours(ws, ch)
-    lim = ch.get("limits", {})
-    n_exp = len([r for r in ledger_rows(ws) if r.get("event") == "propose"])
-    hold = sum(1 for m in runs if m.get("purpose") == "holdout")
-    hit = []
-    if lim.get("max_cost_usd") is not None and spent >= lim["max_cost_usd"]:
-        hit.append(f"cost ${spent:.2f} >= ${lim['max_cost_usd']}")
-    if lim.get("max_hours") is not None and hours >= lim["max_hours"]:
-        hit.append(f"hours {hours:.1f} >= {lim['max_hours']}")
-    if lim.get("max_experiments") is not None and n_exp >= lim["max_experiments"]:
-        hit.append(f"experiments {n_exp} >= {lim['max_experiments']}")
-    if lim.get("deadline") and time.strftime("%Y-%m-%dT%H:%M") >= lim["deadline"][:16]:
-        hit.append(f"deadline {lim['deadline']} passed")
-    return {"spent": spent, "hours": hours, "paused": paused, "n_exp": n_exp, "holdout_evals": hold, "hit": hit,
-            "limits": lim}
+    return limit_state(ws, ch)
 
 
 def _gate(ws):
@@ -331,6 +374,9 @@ def _gate(ws):
         return "AUDIT", "audit incomplete: " + "; ".join(f["title"] for f in gate["findings"] if f["severity"] == "procedure")
     if gate["status"] == "STOP" or (gate["status"] == "REVIEW" and not gate.get("waiver")):
         return "WAIT_USER", f"quality gate {gate['status']}: report findings to the user and wait (clock paused)"
+    allowed, reason = task_review_allows_runs(ws)
+    if not allowed:
+        return "TASK_REVIEW", reason
     return None
 
 
@@ -364,18 +410,30 @@ def recommend(ws):
     best = st["best"]
     rec = ("CONTINUE", "exploit around the best; one hypothesis per experiment")
     gate_rec = _gate(ws)
+    cap = lim["limits"].get("max_experiments")
+
+    def reserved_slot_allowed(exp):
+        return cap is None or any(slot_exp == exp and i <= cap
+                                  for i, (slot_exp, _) in enumerate(lim["slots"], 1))
+
+    runnable_pending = [exp for exp in pending if reserved_slot_allowed(exp)]
+    rerun = decided[-1] if decided and st["decisions"][decided[-1]]["decision"] == "rerun" else None
     if st["stops"]:
         rec = ("STOPPED", st["stops"][-1].get("reason", ""))
     elif gate_rec:
         rec = gate_rec
-    elif lim["hit"]:
-        rec = ("STOP", "limit reached: " + "; ".join(lim["hit"]) + " -> finalize (holdout, full run, report)")
-    elif pending:
-        p = pending[0]
+    elif lim["hard_hit"]:
+        rec = ("STOP", "limit reached: " + "; ".join(lim["hard_hit"]) + " -> report the measured results")
+    elif lim["paused"]:
+        rec = ("PAUSED", "clock paused: resume it before launching work")
+    elif runnable_pending:
+        p = runnable_pending[0]
         has_runs = any(m.get("exp") == p for m in list_runs(ws))
         rec = ("DECIDE" if has_runs else "RUN", f"{p}: " + ("ledger.py decide" if has_runs else "run_experiment.py --exp " + p))
-    elif decided and st["decisions"][decided[-1]]["decision"] == "rerun":
-        rec = ("RERUN", f"{decided[-1]} is marginal: run_experiment.py --exp {decided[-1]} --tag r2, then decide again")
+    elif rerun and reserved_slot_allowed(rerun):
+        rec = ("RERUN", f"{rerun} is marginal: run_experiment.py --exp {rerun} --tag r2, then decide again")
+    elif lim["hit"]:
+        rec = ("STOP", "limit reached: " + "; ".join(lim["hit"]) + " -> finalize (holdout, full run, report)")
     elif best is None:
         rec = ("BASELINE", "propose lever=baseline, run it twice (--tag r2), validate_eval.py, decide")
     else:
@@ -447,7 +505,8 @@ def print_status(ws, compact=False, write=False):
         note = " <- within noise of the best: report that the model may be unnecessary" if (
             gap is not None and gap <= md) else ""
         lines.append(f"NO-LLM best {bf['exp']} {bf['candidate']} primary={bf['primary']:.4f} (gap {gap}){note}")
-    lines.append(f"LIMITS cost ${lim['spent']:.3f}/{L.get('max_cost_usd')} hours {lim['hours']:.1f}/{L.get('max_hours')}"
+    cost_note = " (known subtotal; some costs unreported)" if not lim["cost_complete"] else ""
+    lines.append(f"LIMITS cost ${lim['spent']:.3f}/{L.get('max_cost_usd')}{cost_note} hours {lim['hours']:.1f}/{L.get('max_hours')}"
                  f"{' (clock paused)' if lim['paused'] else ''} "
                  f"exps {lim['n_exp']}/{L.get('max_experiments')} holdout {lim['holdout_evals']}/"
                  f"{ch.get('loop', {}).get('max_holdout_evals', 3)}")

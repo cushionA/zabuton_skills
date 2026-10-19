@@ -9,14 +9,17 @@ Checks (all must pass; results go to WS/eval/validation.json, pinned to the eval
   determinism scoring the same outputs twice gives identical results
   oracle     score.oracle(units, split) outputs reach the ceiling (skip only with --no-oracle REASON)
   corrupt    score.corrupt(output, rng) on oracle outputs lowers the score (if defined)
-  reference  no unresolved reference disagreements (score.reference_coverage, if defined)
+  reference  complete dev/holdout item coverage with no unresolved disagreements
+             (score.reference_coverage, if defined; explicit exclusions count as covered)
   rescore    stored baseline scores reproduce from stored outputs
+  identity   baseline outputs were generated from the current source data and scored with the current eval
   noise      two baseline runs give the noise band; must be smaller than the headroom
   spotcheck  a human-style read of the worst baseline items was done (--spotcheck note)
 Optional score.trivial(units, split) reports a trivial baseline (e.g. majority class).
 """
 import argparse
 import json
+import math
 import os
 import random
 import sys
@@ -24,12 +27,63 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import mean, now_iso, paired_items, read_json, read_jsonl, write_json  # noqa: E402
-from workspace import charter as load_charter, eval_hash, load_eval  # noqa: E402
+from workspace import charter as load_charter, data_fingerprint, eval_hash, load_eval  # noqa: E402
 
 
 def _score(score_mod, units, outputs, split):
     sc = score_mod.score(units, outputs, split)
     return sc
+
+
+def _reference_coverage_check(score_mod, units, split):
+    """Fail closed on incomplete or malformed reference coverage reports."""
+    try:
+        cov = score_mod.reference_coverage(units, split)
+    except Exception as e:
+        return False, {"split": split, "error": f"{type(e).__name__}: {e}"}
+    if not isinstance(cov, dict):
+        return False, {"split": split, "error": "reference_coverage must return a dict"}
+
+    # Existing custom scorers may use the more explicit *_items names.
+    fields = ("covered_items", "total_items") if "covered_items" in cov or "total_items" in cov else ("covered", "total")
+    covered, total, unresolved = (cov.get(k) for k in (*fields, "unresolved"))
+
+    def count(value):
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, int):
+            return value >= 0
+        return isinstance(value, float) and math.isfinite(value) and value >= 0 and value.is_integer()
+
+    detail = {"split": split, **cov}
+    if not all(count(v) for v in (covered, total, unresolved)):
+        detail["error"] = "coverage counts must be finite non-negative integers (covered, total, unresolved)"
+        return False, detail
+    if total == 0:
+        detail["error"] = "reference coverage has no expected items"
+        return False, detail
+    if covered != total or unresolved != 0:
+        detail["error"] = "every expected item must have a resolved reference or explicit exclusion"
+        return False, detail
+    return True, detail
+
+
+def _run_identity_check(ws, runs):
+    """Rescoring may update an eval hash, but cannot replace generation data."""
+    current_data, current_eval = data_fingerprint(ws), eval_hash(ws)
+    problems = []
+    for run in runs:
+        meta = read_json(Path(run) / "meta.json", {})
+        reasons = []
+        if not meta.get("data_hash"):
+            reasons.append("generation data snapshot missing; rerun on current data (legacy outputs cannot prove equivalence)")
+        elif meta["data_hash"] != current_data:
+            reasons.append("source data or input-unit definition changed; rerun (rescoring old outputs is insufficient)")
+        if meta.get("eval_hash") != current_eval:
+            reasons.append("eval changed; rescore only after generation data identity passes")
+        if reasons:
+            problems.append({"run": str(run), "reasons": reasons})
+    return not problems, {"data_hash": current_data, "eval_hash": current_eval, "problems": problems}
 
 
 def main():
@@ -46,6 +100,9 @@ def main():
     ws = Path(a.ws)
     ch = load_charter(ws)
     if a.renoise:
+        identity_ok, detail = _run_identity_check(ws, a.renoise)
+        if not identity_ok:
+            sys.exit("REFUSED: noise runs do not describe the current inputs/eval: " + json.dumps(detail))
         items = [read_json(Path(r) / "score.json", {}).get("items", []) for r in a.renoise]
         pi = paired_items(items[0], items[1])
         floor = max(pi["band"] or 0.0, 1.0 / (pi["n"] or 1))
@@ -119,8 +176,9 @@ def main():
             {"oracle": base, "corrupted": s3.get("primary")}, required=False)
 
     if hasattr(score_mod, "reference_coverage"):
-        cov = score_mod.reference_coverage(dev, a.dev)
-        add("reference", not cov.get("unresolved"), cov)
+        coverage = [_reference_coverage_check(score_mod, units, split)
+                    for units, split in ((dev, a.dev), (hold, a.holdout))]
+        add("reference", all(ok for ok, _ in coverage), {"splits": [detail for _, detail in coverage]})
 
     if hasattr(score_mod, "trivial"):
         st = _score(score_mod, dev, score_mod.trivial(dev, a.dev), a.dev)
@@ -128,6 +186,11 @@ def main():
 
     noise = None
     if len(a.runs) >= 2:
+        identity_ok, identity = _run_identity_check(ws, a.runs)
+        add("identity", identity_ok, identity)
+    else:
+        identity_ok = False
+    if len(a.runs) >= 2 and identity_ok:
         prims, harness = [], []
         rescore_ok = True
         by_id = {u["id"]: u for u in dev}
@@ -160,12 +223,13 @@ def main():
         add("noise", headroom is not None and floor < headroom, noise)
         add("harness_health", max(harness) <= 0.05, {"harness_error_rates": harness})
     else:
-        add("noise", False, "pass two baseline runs with --runs to measure the noise floor")
+        add("noise", False, "pass two baseline runs on the current data/eval with --runs to measure the noise floor")
 
     add("spotcheck", len(a.spotcheck.strip()) >= 20, a.spotcheck.strip() or "missing --spotcheck note")
 
     passed = all(c["ok"] for c in checks if c["required"])
-    out = {"passed": passed, "eval_hash": eval_hash(ws), "created": now_iso(), "checks": checks, "noise": noise}
+    out = {"passed": passed, "eval_hash": eval_hash(ws), "data_hash": data_fingerprint(ws),
+           "created": now_iso(), "checks": checks, "noise": noise}
     write_json(ws / "eval" / "validation.json", out)
     if noise:
         ch["noise"] = noise

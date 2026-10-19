@@ -18,6 +18,8 @@ reported by the backend" - never fill gaps with estimates presented as measureme
 5. **Evaluation** - primary and guard metrics, reference tier and how it was built
    (model, runs, disagreement rate, adjudication counts, human-checked sample size), splits
    and grouping, noise floor, validation checks. What may be called accuracy and what not.
+   Link the reviewed policy in `eval/eval_spec.md` and the actual reference-build records in
+   `eval/reference_provenance.json`; keep run metadata out of the frozen policy document.
 6. **Results** - per outcome class (e.g. matched / no match / unsure / conditional /
    failed / not processed) counts against the total, which classes count as auto-decided;
    breakdown by the audit's strata (asymmetric cases, sizes, missing text...); quality on dev
@@ -28,9 +30,15 @@ reported by the backend" - never fill gaps with estimates presented as measureme
    concurrency, cold vs warm cache, retries and timeouts.
 8. **Usage and cost** - calls, input/output/cache-read/cache-write/thinking tokens per unit
    and total, cost with its basis, uncached comparison, harness overhead (calibration) noted.
+   Distinguish measured zero (including a code-only candidate) from missing/unreported cost.
+   An uncached cost estimate remains unknown if any required token component is unreported.
+   Positive -> zero efficiency is a 100% reduction; zero -> zero is a tie. State any observed
+   limit overrun caused by calls already in flight rather than claiming an absolute USD cap.
 9. **Improvement history** - ledger table: experiment, lever, hypothesis (short), delta,
    decision; what moved the score and why; what did not work (dead ends are findings too);
    phase switch point; stop reason.
+    Include the source-data generation identity for compared runs. If data, loader or splits
+    changed, keep the generations separate; rescoring old outputs does not measure new inputs.
 10. **Examples** - representative successes, failures and holds with the evidence used
     (ids, short quotes), especially for the hard strata.
 11. **Rules, dictionaries, maintenance** - size of rules/vocabularies/prompts, what would need
@@ -43,6 +51,35 @@ reported by the backend" - never fill gaps with estimates presented as measureme
     units, each with the measurement it comes from and the backend caveats.
 14. **Limitations and next steps** - reference bias, data not independent of past
     development, untested backends, levers left untried, what more budget would buy.
+
+## Replay package
+
+Write the final design and report in `WS/` before running `export_deliverables.py`. Export to
+an empty destination; use `--out <new empty directory>` for a later export. Select runs of
+the recommended candidate with the same effective measured settings, so the production
+recommendation has a single reproducible configuration.
+
+The package includes the selected pipeline, the baseline candidate checked by task review,
+design/eval files, audit and any recorded user acceptance, task review, ledger, run
+metadata/summaries/scores, selected calls/outputs and baseline outputs needed for validation.
+Unrelated raw prompts/calls/outputs are omitted; rescoring those historical runs needs the
+original workspace. `replay.json` lists retained history and external dependencies. Supplied
+raw inputs outside the workspace are not silently copied into the package.
+
+Before replay on another machine, use:
+
+```bash
+python SKILL_DIR/scripts/relocate_workspace.py PACKAGE --data-map OLD_DATA_PREFIX=NEW_DATA_PREFIX --dry-run
+python SKILL_DIR/scripts/relocate_workspace.py PACKAGE --data-map OLD_DATA_PREFIX=NEW_DATA_PREFIX
+```
+
+Bundled workspace paths are mapped automatically; external inputs/auxiliary files and briefs
+need explicit maps if their original paths are unavailable. Relocation checks the audited
+data and reviewed design bytes before writing any path or approval record. It preserves an
+existing acceptance only for verified identical content; changed content requires audit and
+review. It cannot fabricate an approval. Original STOP, time/budget and holdout history remain
+in force after export and relocation. A package can be inspected even when those controls
+prevent more measurements; list unavailable final checks as not run.
 
 ## History table (from the ledger)
 

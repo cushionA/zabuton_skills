@@ -16,13 +16,15 @@ import common  # noqa: E402
 import ledger  # noqa: E402
 import llm_call  # noqa: E402
 import run_experiment  # noqa: E402
+import task_review  # noqa: E402
 
 PY = sys.executable
 
 CHECKS = '''
 import json
 def run_checks(ctx):
-    recs = [json.loads(l) for l in open(ctx.inputs[0], encoding="utf-8") if l.strip()]
+    with open(ctx.inputs[0], encoding="utf-8") as handle:
+        recs = [json.loads(l) for l in handle if l.strip()]
     return [ctx.finding("size", "info", f"{len(recs)} records"),
             ctx.finding("no-labels", "high", "labels not included", known=True)]
 '''
@@ -66,7 +68,7 @@ class FlowTest(unittest.TestCase):
             keys = [f"good-{i}", f"bad-{i}", f"fine-{i}"]
             rows.append({"id": f"u{i:02d}", "item_keys": keys})
         data.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
-        self.run_py("init_workspace.py", str(self.ws), "--task", "toy", "--data", str(data))
+        self.run_py("init_workspace.py", str(self.ws), "--task", "toy", "--data", str(data), "--backend", "claude")
         (self.ws / "audit" / "checks.py").write_text(CHECKS, encoding="utf-8")
         self.run_py("profile_data.py", str(data), "--out", str(self.ws / "audit" / "profile"))
         (self.ws / "audit" / "data_audit.md").write_text("toy audit\n", encoding="utf-8")
@@ -116,12 +118,30 @@ class FlowTest(unittest.TestCase):
             res = fn(*a, **k)
         return res, buf.getvalue()
 
+    def review_task(self):
+        (self.ws / "experiment_plan.md").write_text("Label all expected toy items.\n", encoding="utf-8")
+        (self.ws / "eval" / "eval_spec.md").write_text("Item label agreement, with every item counted.\n", encoding="utf-8")
+        request = task_review.prepare_review(self.ws, "c001-rule")
+        (self.ws / "review" / "task_review.md").write_text("Synthetic fixture: six checks verified.\n", encoding="utf-8")
+        result = self.ws / "review" / "task_review_result.json"
+        common.write_json(result, {
+            "design_hash": request["design_hash"],
+            "reviewer": {"id": "test-fixture-reviewer", "kind": "subagent"},
+            "checks": [{"id": check, "status": "PASS", "evidence": "Synthetic test fixture: explicit toy item contract."}
+                       for check in task_review.CHECKS],
+            "report": "review/task_review.md",
+        })
+        task_review.record_review(self.ws, result)
+
     def test_full_flow(self):
         # gate blocks runs until it exists
         with self.assertRaises(SystemExit):
             self.quiet(run_experiment.run, self.ws, "c001-rule", "dev", "baseline")
         r = self.run_py("quality_gate.py", str(self.ws))
         self.assertIn("GATE PASS", r.stdout)  # known high finding does not block
+        with self.assertRaisesRegex(SystemExit, "task review PENDING"):
+            self.quiet(run_experiment.run, self.ws, "c001-rule", "dev", "baseline")
+        self.review_task()
         # experiment purpose needs eval validation
         with self.assertRaises(SystemExit):
             self.quiet(run_experiment.run, self.ws, "c001-rule", "dev", "experiment")
@@ -154,6 +174,7 @@ class FlowTest(unittest.TestCase):
         (self.ws / "candidates" / "c002-llm" / "pipeline.py").write_text(LLM_PIPELINE + "\n# edit\n", encoding="utf-8")
         with self.assertRaises(SystemExit):
             self.quiet(run_experiment.run, self.ws, "c002-llm", "dev", "experiment")
+        (self.ws / "candidates" / "c002-llm" / "pipeline.py").write_text(LLM_PIPELINE, encoding="utf-8")
         # novelty check: a near-duplicate of a discarded idea is refused
         self.run_py("ledger.py", "propose", str(self.ws), "--candidate", "c001-rule", "--lever", "prompt.instructions",
                     "--hypothesis", "tighten the instructions about fine items")
@@ -171,6 +192,7 @@ class FlowTest(unittest.TestCase):
         cfg = common.read_json(self.ws / "deliverables" / "production_config.json")
         self.assertEqual(cfg["settings"]["max_tokens"]["value"], 512)
         self.assertTrue((self.ws / "deliverables" / "candidates" / "c002-llm" / "pipeline.py").exists())
+        self.assertTrue((self.ws / "deliverables" / "review" / "task_review.json").exists())
         self.assertIn("missing", ex.stdout)  # task_design.md / report.md not written yet
         # a defect found on close reading turns the gate into REVIEW, pauses the clock, blocks runs
         common.append_jsonl(self.ws / "audit" / "close_read.jsonl",
@@ -236,10 +258,12 @@ class DiversifyTest(unittest.TestCase):
                 rows.append({"event": "decide", "exp": f"E{i:03d}", "decision": "discard", "phase": "quality", "at": str(i)})
             for r in rows:
                 common.append_jsonl(ws / "ledger.jsonl", r)
-            rec = ledger.recommend(ws)
+            with mock.patch.object(ledger, "task_review_allows_runs", return_value=(True, "fixture")):
+                rec = ledger.recommend(ws)
             self.assertEqual(rec["rec"][0], "FRESH_EYES")
             common.append_jsonl(ws / "ledger.jsonl", {"event": "mark", "kind": "fresh-eyes", "text": "x", "at": "9"})
-            rec = ledger.recommend(ws)
+            with mock.patch.object(ledger, "task_review_allows_runs", return_value=(True, "fixture")):
+                rec = ledger.recommend(ws)
             self.assertEqual(rec["rec"][0], "DIVERSIFY")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)

@@ -1,7 +1,7 @@
 """Create an experiment workspace from the template (never overwrites existing files).
 
   python init_workspace.py WS --task "short name" --data PATH [PATH...] [--brief PATH]
-      [--model haiku] [--backend cli|api] [--effort low]
+      [--model MODEL] [--backend auto|codex|claude|cli|api] [--effort low]
   python init_workspace.py WS --migrate     # after a skill update: add new charter fields
 """
 import argparse
@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import now_iso, read_json, write_json  # noqa: E402
+from llm_call import BACKENDS, resolve_backend, resolve_model  # noqa: E402
 
 TEMPLATE = Path(__file__).resolve().parents[1] / "assets" / "workspace_template"
 
@@ -56,8 +57,9 @@ def main():
     ap.add_argument("--task", required="--migrate" not in sys.argv)
     ap.add_argument("--data", nargs="+", required="--migrate" not in sys.argv, help="input files the pipeline will read")
     ap.add_argument("--brief", default="", help="path to the user's task brief, if any")
-    ap.add_argument("--model", default="haiku")
-    ap.add_argument("--backend", default="cli", choices=["cli", "api"])
+    ap.add_argument("--model", help="default: gpt-6-luna on Codex, haiku on Claude/API")
+    ap.add_argument("--backend", default="auto", choices=BACKENDS)
+    ap.add_argument("--reference-model", help="default: gpt-6-luna on Codex, opus on Claude/API")
     ap.add_argument("--effort", default="low")
     a = ap.parse_args()
     ws = Path(a.ws)
@@ -76,21 +78,31 @@ def main():
             shutil.copy2(src, dst)
     ch = read_json(ws / "charter.json")
     if not ch.get("created"):
+        try:
+            backend = resolve_backend(a.backend)
+            model = resolve_model(a.model, backend)
+        except ValueError as e:
+            ap.error(str(e))
         ch.update(task=a.task, brief=a.brief, created=now_iso(), created_epoch=time.time(),
                   skill_dir=str(TEMPLATE.parents[1]))
         ch["data"]["inputs"] = [str(Path(p).resolve()) for p in a.data]
-        ch["backend"].update(backend=a.backend, model=a.model, effort=a.effort)
+        ch["backend"].update(backend=backend, model=model, effort=a.effort)
+        ch["reference_model"] = a.reference_model or ("gpt-6-luna" if backend == "codex" else "opus")
+        if backend == "codex":
+            ch["efficiency_metric"] = "calls_per_unit"
         write_json(ws / "charter.json", ch)
     for name, text in (("journal.md", JOURNAL),):
         if not (ws / name).exists():
             (ws / name).write_text(text, encoding="utf-8")
     (ws / "ledger.jsonl").touch()
     # empty dirs are not kept by git, so create them here rather than relying on the template
-    for d in ("runs", "eval/reference"):
+    for d in ("runs", "eval/reference", "review"):
         (ws / d).mkdir(parents=True, exist_ok=True)
     print(f"workspace ready: {ws}")
+    print(f"model backend: {ch['backend']['backend']} / {ch['backend']['model']}")
     print("next: profile_data.py -> audit/checks.py + data_audit.md -> quality_gate.py "
-          "-> experiment_plan.md + eval/ -> baseline x2 -> validate_eval.py -> loop")
+          "-> experiment_plan.md + draft eval/ -> task_review.py prepare/record "
+          "-> baseline x2 -> validate_eval.py -> loop")
 
 
 if __name__ == "__main__":

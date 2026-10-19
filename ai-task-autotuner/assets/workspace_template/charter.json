@@ -10,15 +10,15 @@
     "scope_notes": "what is in scope, what is excluded and why (counts against the original totals)"
   },
   "backend": {
-    "backend": "cli",
-    "model": "haiku",
+    "backend": "auto",
+    "model": "auto",
     "effort": "low",
     "thinking": "off",
     "concurrency": 6,
     "timeout_s": 300,
     "retries": 2
   },
-  "reference_model": "opus",
+  "reference_model": "auto",
   "primary": {
     "metric": "primary",
     "direction": "max",

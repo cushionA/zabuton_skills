@@ -13,7 +13,8 @@ Optional hooks used by validate_eval.py / reference.py:
   flatten(unit, output) -> {item_key: label}     (reference merging)
   oracle(units, split) -> outputs that must reach the ceiling
   corrupt(output, rng) -> output with injected errors (score must drop)
-  reference_coverage(units, split) -> {"covered", "total", "unresolved"}
+  reference_coverage(units, split) -> {"covered", "total", "unresolved"} item counts
+      Every expected item needs a resolved reference or explicit exclusion, on dev and holdout.
   trivial(units, split) -> outputs of a trivial baseline (majority class, first candidate...)
 
 This template scores item-level labels against eval/reference/<split>*.jsonl, where the
@@ -33,6 +34,25 @@ def expected_keys(unit):
     return [str(k) for k in unit["input"].get("item_keys", [])]
 
 
+def _item_keys(unit):
+    # Expectations must come from the input, never from what reference runs happened to emit.
+    return [f"{unit['id']}|{k}" for k in expected_keys(unit)]
+
+
+def _resolved_reference(entry):
+    """A key alone is not a resolved answer; null itself can be a valid label."""
+    if not isinstance(entry, dict):
+        return False
+    if entry.get("exclude") is True:
+        return True
+    if entry.get("exclude"):
+        return False  # Exclusions must be explicit JSON true, not a truthy string or number.
+    if "acceptable" in entry:
+        # label_matches gives acceptable precedence over label when both are present.
+        return isinstance(entry["acceptable"], list) and bool(entry["acceptable"])
+    return "label" in entry
+
+
 def flatten(unit, output):
     if not isinstance(output, dict):
         return {}
@@ -46,15 +66,21 @@ def score(units, outputs, split):
     for u in units:
         out = outputs.get(u["id"])
         pred = flatten(u, out) if out is not None else {}
-        keys = [f"{u['id']}|{k}" for k in expected_keys(u)] or [k for k in ref if k.startswith(f"{u['id']}|")]
+        keys = _item_keys(u)
         extra = set(pred) - set(keys)
         if out is not None and extra:
             gate.append(f"{u['id']}: {len(extra)} unknown keys")
         for k in keys:
             entry = ref.get(k)
-            if entry is None or entry.get("exclude"):
+            if _resolved_reference(entry) and entry.get("exclude") is True:
                 continue
             p = pred.get(k)
+            if not _resolved_reference(entry):
+                kind = "missing" if entry is None else "invalid"
+                gate.append(f"{u['id']}: {kind} reference for {k}")
+                tags = [f"{kind}-reference"] + (["missing"] if k not in pred else [])
+                items.append({"id": k, "unit": u["id"], "score": 0.0, "tags": tags, "pred": p, "ref": None})
+                continue
             ok = label_matches(p, entry) if k in pred else False
             tags = [] if ok else (["missing"] if k not in pred else ["wrong"])
             if not ok:
@@ -75,8 +101,8 @@ def oracle(units, split):
     for u in units:
         its = []
         for k, e in ref.items():
-            if k.startswith(f"{u['id']}|") and not e.get("exclude"):
-                label = e["label"] if "label" in e else e["acceptable"][0]
+            if k.startswith(f"{u['id']}|") and _resolved_reference(e) and e.get("exclude") is not True:
+                label = e["acceptable"][0] if "acceptable" in e else e["label"]
                 its.append({"key": k.split("|", 1)[1], "label": label})
         out[u["id"]] = {"items": its}
     return out
@@ -96,5 +122,9 @@ def corrupt(output, rng):
 def reference_coverage(units, split):
     ref = load_reference(WS, split)
     unresolved = ref.pop("__unresolved__", [])
-    covered = sum(1 for u in units if any(k.startswith(f"{u['id']}|") for k in ref))
-    return {"covered": covered, "total": len(units), "unresolved": len(unresolved)}
+    keys = [k for u in units for k in _item_keys(u)]
+    missing = [k for k in keys if k not in ref]
+    invalid = [k for k in keys if k in ref and not _resolved_reference(ref[k])]
+    excluded = sum(1 for k in keys if k in ref and ref[k].get("exclude") is True)
+    return {"covered": len(keys) - len(missing) - len(invalid), "total": len(keys), "unresolved": len(unresolved),
+            "excluded": excluded, "missing_sample": missing[:10], "invalid_sample": invalid[:10]}

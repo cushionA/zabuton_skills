@@ -1,5 +1,4 @@
 {
-  "model": "haiku",
   "effort": "low",
   "thinking": "off",
   "max_tokens": 16000,

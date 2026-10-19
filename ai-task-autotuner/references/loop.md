@@ -29,6 +29,12 @@ points) · stop rules · journal · running long jobs
 5. `ledger.py propose ...`, smoke run (`--purpose smoke --limit 2`), full dev run with
    `--exp`, `ledger.py decide`, journal block.
 
+`--exp` binds a run to the candidate registered by that proposal. Passing a different candidate
+is refused before work starts; the ledger also rejects historical mismatches rather than
+crediting their scores to the proposal. Candidate bytes and merged backend/model/effort/runtime
+settings freeze at the first non-smoke measurement. Copy to a new candidate before changing
+them; historical mixed settings cannot be averaged as repeats of the same configuration.
+
 ## Writing a hypothesis
 
 - One behavior, one root cause, one change (it may touch several places).
@@ -53,11 +59,15 @@ Compared with the current best on the same split and eval version, items paired 
   efficiency metric - simpler and cheaper wins ties. Otherwise `discard`.
 - Efficiency phase: `keep` when primary stays >= the floor and the efficiency metric improves
   by >= `min_efficiency_gain` (10%), or primary improves at equal cost.
+- A measured efficiency of zero is valid: positive -> zero is a 100% reduction and zero ->
+  zero is a tie. Missing, non-finite or otherwise invalid measurements remain unknown; they
+  cannot become a free candidate or a claimed efficiency gain.
 - `rerun`: a marginal keep (delta < 2x min_delta, or near the floor) from one run - repeat it
   (`--tag r2`) and decide again on the pooled runs. The decision line also prints a
   unit-bootstrap 95% interval; when it straddles zero, more repeats beat more rounds.
-- Decisions keep the numbers of their time. After an eval change and `--rescore`, `status`
-  re-pools the best from rescored runs and flags anything still stale.
+- Decisions keep the numbers of their time. After a scorer/reference change and `--rescore`,
+  `status` re-pools the best from rescored runs and flags anything still stale. Changed source
+  data, loader or splits require newly generated outputs, as described in evaluation.md.
 - `--override keep|discard --reason` exists for evidence the rules cannot see; use rarely and
   say why. Discarded and kept candidates both stay on disk.
 
@@ -90,8 +100,9 @@ Report cost per completed unit, not per call: a cheaper call that fails more is 
 Each efficiency keep may give back a little quality; `status` prints the DRIFT since the phase
 switch and warns when the cumulative drop exceeds min_delta - check holdout before cutting further.
 Runs broken by infrastructure (quota, outages) never count: the ledger skips quota-exhausted runs,
-and `ledger.py void WS RUN --reason` excludes any other broken run. Concurrency is a runtime knob:
-`run_experiment.py --concurrency N` changes it without editing (and re-freezing) the candidate.
+and `ledger.py void WS RUN --reason` excludes any other broken run. `--concurrency N` records
+the actual parallelism in the effective settings. Set it before the first non-smoke measurement;
+changing it afterward, even for a code-only candidate, requires a new candidate.
 
 ## Avoiding dead ends
 
@@ -109,7 +120,7 @@ diversity mechanically; your job is to take its advice seriously.
   `ledger.py mark WS fresh-eyes "<what changed in your understanding>"`:
   1. Re-bucket all remaining dev failures (table above) with counts.
   2. Headroom probe - one dev run that tells you where the ceiling is, e.g. the same prompt
-     on a stronger model (if it also fails, the spec or reference is the problem, not model
+     on an explicitly configured stronger model (if it also fails, the spec or reference is the problem, not model
      capacity); or feed one stage oracle input (true candidates, true attributes) to measure
      the ceiling of the next stage; or an ablation removing a component. Run it with
      `--purpose probe` and record it with `ledger.py mark WS headroom "<result>"`. Probes are
@@ -135,9 +146,9 @@ diversity mechanically; your job is to take its advice seriously.
 ## Stop rules
 
 In priority order:
-1. A user limit is reached (cost, hours, experiments, deadline) - finalize and report. If the
-   score is still clearly climbing, say so in the report and offer to continue; do not exceed a
-   limit the user set.
+1. A user limit is reached (cost, hours, experiments, deadline) - finalize and report from
+   available evidence. If the score is still clearly climbing, say so in the report and offer
+   to continue; do not exceed a limit the user set.
 2. User targets met (quality, then efficiency if set) - finalize.
 3. No limits given: stop when the efficiency phase plateaus (same plateau rule) - this is the
    improvement limit. Also stop on repeated infrastructure failure you cannot fix (report it).
@@ -149,7 +160,25 @@ In priority order:
    absolute wall-clock time and does not move with pauses.
 5. Never stop silently: `ledger.py stop WS --reason "..."`, then finalize.
 
+The runner enforces explicit ledger STOP, a paused clock, observed USD spend, active hours
+and wall-clock deadline at entry, before units, and before each physical model attempt.
+Semaphore-queued calls re-check after acquiring a slot; retries check again too. Reached
+money/time/deadline limits and STOP block new work, including finalization calls. Calls
+already in flight may complete above the observed USD cap; this is not an absolute billing
+reservation. Unreported costs cannot be treated as zero to satisfy a USD limit.
+An abandoned prior run without cost evidence also prevents claiming the remaining USD budget;
+the current run is exempt only until its own attempts produce observed cost evidence.
+
+`limits.max_experiments` reserves slots for proposals and direct candidates. The last allowed
+proposal can still run and repeat within its reserved slot. Final checks can reuse an already
+measured candidate, but cannot add a new candidate beyond the cap or bypass STOP, paused time,
+money or deadline restrictions. Do not set STOP before optional final measurements you still
+intend to run; once stopped, export and report the existing evidence.
+
 ## Finalize
+
+Do these measurements only while execution limits permit them. If a hard limit or STOP has
+already fired, report which checks were not run and use existing evidence.
 
 1. Holdout: run the final best (and baseline, if not yet) once: `--split holdout --purpose
    holdout`. The headline is the holdout delta baseline -> best with intervals. If dev gains do
@@ -157,9 +186,12 @@ In priority order:
 2. Consistency: 3 runs of the best on dev (`--tag r1..r3`), `analyze_run.py --consistency`
    for pass^k and flaky items.
 3. Full-scope run (`--split full --purpose full`) for time, usage and outcome distribution.
-4. `export_deliverables.py WS --candidate <best> --runs <full run> <holdout run>` for the
-   measured production settings; write `task_design.md` (task-design.md) and the report
-   (report.md); re-run export so they are copied in.
+   If it includes holdout ids it also consumes a peek for that candidate's identity, bytes
+   and effective settings; identical repeats of an already evaluated candidate share its peek.
+4. Write `WS/task_design.md` (task-design.md) and `WS/report.md` (report.md), then run
+   `export_deliverables.py WS --candidate <best> --runs <full run> <holdout run>` for the
+   measured production settings and replay dependencies. Use an empty export destination;
+   after a later report update, export again with `--out <new empty directory>`.
 
 ## Journal (`journal.md`)
 

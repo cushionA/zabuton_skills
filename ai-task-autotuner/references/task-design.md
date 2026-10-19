@@ -1,7 +1,7 @@
 # Task design: from audit to experiment plan
 
 Contents: plan template · code + model pipelines · deriving a task from existing data ·
-baseline · prompt conventions · thinking and output budget · lever catalog · caching ·
+baseline · draft evaluation and independent review · prompt conventions · thinking and output budget · lever catalog · caching ·
 leakage · task_design.md
 
 ## experiment_plan.md
@@ -43,6 +43,11 @@ faster and more stable than a model call.
   report that share too ("62% of items decided by rules at 99% agreement; model only for the rest").
 - Rules and dictionaries are part of the design: record their size and where they came from
   (dev only), because they are what needs maintenance later.
+- For every automatic decision, state the evidence that makes it safe and construct a
+  counterexample that almost passes (swapped axes, different capacity/count/model, missing
+  or free add-ons). Values matching is insufficient when their roles differ. If a required
+  distinction cannot be checked, defer to the model or review outcome. Record these probes
+  for the [independent task review](task-review.md); zero observed errors is not a proof.
 
 ## Deriving a task from existing data
 
@@ -65,9 +70,35 @@ Often the data holds positives only (pairs, links, past decisions) and the task 
 ## Baseline
 
 The simplest design that could work: one call per natural unit, complete instructions,
-JSON output with ids, effort `low`, thinking off where possible, no examples. If a no-model
+JSON output with ids, effort `low`, thinking off where supported, no examples. Backend `auto`
+selects Codex/Luna (`gpt-6-luna`) on Codex and Claude/Haiku on Claude; follow explicit choices
+and retain the resolved settings in the charter. If a no-model
 heuristic is plausible, measure it too - it calibrates whether the model adds value, and it
 is the cheapest efficiency-phase fallback.
+
+## Draft evaluation and independent review
+
+Finish `experiment_plan.md`, `eval/eval_spec.md`, `eval/dataset.py`, `eval/score.py`,
+`eval/splits.json` and the baseline candidate before reference-building or baseline runs.
+These are drafts until reviewed: include the complete output contract, failure/hold handling,
+metrics and guards, grouping, negative construction and the reference-building plan. Reference
+labels need not exist yet. Use synthetic and dev-only probes to exercise the scorer and rules;
+do not inspect holdout examples to prepare the review.
+
+Keep the reviewed task/evaluation policy in `eval/eval_spec.md`. Later reference-run models,
+prompt versions, run ids, dates and adjudication records/counts belong in generated
+`eval/reference_provenance.json`; writing them does not change the reviewed design.
+
+Run [task-review.md](task-review.md) once for this design. An independent reviewer checks
+whether the task serves the goal and whether its input, code decisions and evaluation can
+support the intended claims. A REVISE verdict is work for the author: fix it, prepare an
+updated request and have the reviewer re-check the changes and their effects. Ask the user
+only for a decision that belongs to them. A current PASS permits reference and baseline runs;
+evaluation validation and freezing follow the two baseline runs.
+
+Ordinary prompt/code tuning candidates do not trigger another full design review. If tuning
+changes the task definition, output contract, metrics, grouping or safety assumptions, update
+the design files and review the affected scope before measuring that changed design.
 
 ## Prompt conventions
 
@@ -79,18 +110,22 @@ is the cheapest efficiency-phase fallback.
   needs. Short per-item rationale only if it measurably helps (it costs output tokens).
 - Fixed content first (system prompt, rules, examples), the unit's data last - this is what
   prompt caching can reuse.
-- Avoid `--json-schema` on the cli backend (it adds a tool round-trip); ask for JSON and
-  parse with `extract_json`. On the api backend structured outputs are fine.
+- Avoid `--json-schema` on the Claude backend (it adds a tool round-trip); ask for JSON and
+  parse with `extract_json`. Codex also requests JSON in the prompt; its JSONL CLI events
+  wrap the final answer, not the task's output schema. On the api backend structured outputs
+  are fine.
 
 ## Thinking and output budget
 
-- Default: effort `low`, `thinking: "off"` in config (honored on the api backend for Haiku 5.5
-  and Sonnet 5.5; the cli backend still thinks a little - measured as `usage.thinking`).
+- Default: effort `low`, `thinking: "off"` where supported (honored on the api backend for
+  Haiku 5.5 and Sonnet 5.5). Neither CLI guarantees thinking off. Claude reports thinking
+  usage; Codex does not expose it separately, so record it as unreported.
 - Raise effort only as an experiment (`model.effort`) and keep it only if quality gains pay
   for the extra output tokens and latency.
-- `max_tokens` during experiments: generous enough that truncation never decides a result
+- `max_tokens` on supporting backends during experiments: generous enough that truncation never decides a result
   (watch `truncated` in analyze_run); the production value comes from the measured output
-  distribution (`export_deliverables.py`).
+  distribution (`export_deliverables.py`). Codex CLI does not expose a supported per-response
+  `max_tokens` control; report that limit as unenforced, not as a production guarantee.
 
 ## Lever catalog
 
@@ -115,8 +150,9 @@ is the cheapest efficiency-phase fallback.
 
 ## Caching
 
-Static prefix first, variable data last. On the cli backend caching is automatic (watch
-`cache_hit_ratio` in the summary); on the api backend mark the system prompt with
+Static prefix first, variable data last. Claude CLI caching is automatic (watch
+`cache_hit_ratio` in the summary); Codex reports cached input tokens when available, with
+uncached input calculated as total input minus cached input. On the api backend mark the system prompt with
 `cache_control` (llm_call does by default). Effort or model changes invalidate caches -
 compare warm with warm. The first run after a prompt change pays cache writes; note cold vs
 warm when reporting time and cost.

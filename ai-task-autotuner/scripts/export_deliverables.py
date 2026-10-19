@@ -28,8 +28,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import now_iso, percentile, read_json, read_jsonl, write_json  # noqa: E402
-from workspace import list_runs  # noqa: E402
+from common import append_jsonl, now_iso, percentile, read_json, read_jsonl, write_json  # noqa: E402
+from workspace import candidate_hash, data_fingerprint, eval_hash, list_runs  # noqa: E402
+from quality_gate import gate_allows_runs  # noqa: E402
+from task_review import task_review_allows_runs  # noqa: E402
+from relocate_workspace import relocate  # noqa: E402
 
 
 def _round_up(x, step):
@@ -65,7 +68,7 @@ def recommend(ws, candidate, run_dirs):
                    "why": f"as measured; efforts measured in this workspace: {tried} ('low' is the lowest level)"}
     S["thinking"] = {"value": cfg.get("thinking", "off"),
                      "measured_thinking_tokens_per_call": {"p50": percentile(thinking, .5), "max": max(thinking) if thinking else None}}
-    if outs:
+    if outs and S["backend_measured"] != "codex":
         mx, p99 = max(outs), percentile(outs, .99)
         mt = max(_round_up(mx * 1.5, 256), _round_up(p99 * 2, 256), 512)
         S["max_tokens"] = {"value": mt, "why": f"observed output (incl. thinking) p50={percentile(outs, .5)} "
@@ -73,9 +76,17 @@ def recommend(ws, candidate, run_dirs):
         if truncated:
             rec["caveats"].append(f"{truncated} calls hit max_tokens during measurement: the recommendation is a floor; "
                                   "re-measure with a higher limit")
-    if api:
+    if S["backend_measured"] == "codex":
+        S["max_tokens"] = {"value": None, "why": "Codex CLI has no supported max-output-token flag"}
+        S["thinking"]["value"] = "backend managed"
+        if wall:
+            S["timeout_s"] = {"value": max(30, _round_up(3 * percentile(wall, .99) / 1000, 10)),
+                              "why": "3 x p99 measured CLI wall time; API-only latency is not reported"}
+        rec["caveats"].append("measured through codex exec: USD cost, API-only latency, thinking tokens and served model "
+                              "may not be reported; max_tokens and thinking=off are not enforced")
+    elif api:
         p99a = percentile(api, .99)
-        overhead = (percentile(wall, .99) - p99a) if (wall and S["backend_measured"] == "cli") else 0
+        overhead = (percentile(wall, .99) - p99a) if (wall and S["backend_measured"] in ("cli", "claude")) else 0
         S["timeout_s"] = {"value": max(30, _round_up((3 * p99a + max(0, overhead)) / 1000, 10)),
                           "why": f"api_ms p50={percentile(api, .5)} p99={p99a} max={max(api)}"
                                  + (f"; cli start-up ~{overhead:.0f} ms at p99" if overhead else "")}
@@ -99,7 +110,7 @@ def recommend(ws, candidate, run_dirs):
                        "are shown with their cache hit ratio - a warm rerun can be several times cheaper")
     E["api_ms_per_call_p50"] = percentile(api, .5) if api else None
     E["unit_wall_ms_p50"] = percentile([s.get("unit_wall_ms", {}).get("p50") for s in summaries], .5)
-    if S["backend_measured"] == "cli":
+    if S["backend_measured"] in ("cli", "claude"):
         rec["caveats"].append("measured through claude -p: ~800 extra input tokens per call and process start-up "
                               "time that a direct API call would not have; the cli cannot turn thinking off, so the "
                               "api backend with thinking off may produce fewer output tokens")
@@ -108,23 +119,50 @@ def recommend(ws, candidate, run_dirs):
     return rec
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("ws")
-    ap.add_argument("--candidate", required=True)
-    ap.add_argument("--runs", nargs="*")
-    ap.add_argument("--out")
-    a = ap.parse_args()
-    ws = Path(a.ws)
-    out = Path(a.out) if a.out else ws / "deliverables"
-    out.mkdir(parents=True, exist_ok=True)
-    cand = ws / "candidates" / a.candidate
-    if not cand.exists():
-        sys.exit(f"no candidate {cand}")
-    runs = a.runs or [m["_dir"] for m in list_runs(ws) if m.get("candidate") == a.candidate and m.get("purpose") != "smoke"]
+def export_workspace(ws, candidate, run_dirs=None, out=None):
+    """Export replay dependencies and control history, without unrelated raw calls/outputs."""
+    ws = Path(ws).resolve()
+    out = Path(out).resolve() if out else ws / "deliverables"
+    if out == ws or ws.is_relative_to(out):
+        raise ValueError("export destination must not contain the source workspace")
+    if any(out.is_relative_to(ws / name) for name in ("audit", "review", "eval", "candidates", "data_built", "runs")):
+        raise ValueError("export destination must not alter workspace evidence or data")
+    if out.exists() and any(out.iterdir()):
+        raise ValueError("export destination must be empty; use a new directory")
+    cand = ws / "candidates" / candidate
+    if not cand.is_dir() or cand.parent != ws / "candidates":
+        raise ValueError(f"no candidate {cand}")
+    for allowed, reason in (gate_allows_runs(ws), task_review_allows_runs(ws)):
+        if not allowed:
+            raise ValueError("cannot export a replayable workspace: " + reason)
+    relocate(ws, dry_run=True)  # verify all replay evidence before creating the export
+    runs = [Path(d).resolve() for d in run_dirs] if run_dirs is not None else [
+        Path(m["_dir"]) for m in list_runs(ws)
+        if m.get("candidate") == candidate and m.get("purpose") != "smoke"]
     if not runs:
-        sys.exit("no measured runs of this candidate")
-    shutil.copytree(cand, out / "candidates" / a.candidate, dirs_exist_ok=True,
+        raise ValueError("no measured runs of this candidate")
+    configs = []
+    current_candidate_hash = candidate_hash(cand)
+    current_data_hash = data_fingerprint(ws)
+    current_eval_hash = eval_hash(ws)
+    for d in runs:
+        meta = read_json(d / "meta.json", {})
+        if (not d.is_relative_to(ws / "runs") or meta.get("candidate") != candidate
+                or meta.get("purpose") == "smoke"):
+            raise ValueError("--runs must name measured runs of the exported candidate in this workspace")
+        if not all((d / name).is_file() for name in ("meta.json", "summary.json", "score.json", "outputs.jsonl")):
+            raise ValueError(f"incomplete measured run: {d}")
+        score = read_json(d / "score.json")
+        if (meta.get("candidate_hash") != current_candidate_hash
+                or meta.get("data_hash") != current_data_hash
+                or meta.get("eval_hash") != current_eval_hash
+                or score.get("eval_hash") != meta.get("eval_hash")):
+            raise ValueError(f"stale or mismatched measured run: {d}; repair/rescore before export")
+        configs.append(meta.get("config", {}))
+    if any(c != configs[0] for c in configs[1:]):
+        raise ValueError("selected runs used different effective settings; select one measured configuration")
+    out.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(cand, out / "candidates" / candidate, dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns("__pycache__"))
     # the task's actual outputs: the user needs results, not only the method
     for d in runs:
@@ -133,38 +171,115 @@ def main():
             (out / "results").mkdir(exist_ok=True)
             shutil.copy2(Path(d) / "outputs.jsonl", out / "results" / f"{meta['run_id']}.outputs.jsonl")
             shutil.copy2(Path(d) / "summary.json", out / "results" / f"{meta['run_id']}.summary.json")
-    for name in ("dataset.py", "score.py", "splits.json", "eval_spec.md", "validation.json"):
-        src = ws / "eval" / name
-        if src.exists():
-            (out / "eval").mkdir(exist_ok=True)
-            shutil.copy2(src, out / "eval" / name)
-    ref = ws / "eval" / "reference"
-    if ref.exists() and any(f.is_file() for f in ref.rglob("*")):
-        shutil.copytree(ref, out / "eval" / "reference", dirs_exist_ok=True)
-    shutil.copy2(ws / "charter.json", out / "charter.json")
+    # Task-specific helpers under eval/ are executable dependencies too.
+    shutil.copytree(ws / "eval", out / "eval", dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    ch = read_json(ws / "charter.json")
+    # The root defaults may have changed after measurement. Preserve the selected
+    # run's effective settings without mutating the frozen candidate bytes.
+    ch["backend"] = configs[-1]
+    write_json(out / "charter.json", ch)
+    shutil.copytree(ws / "audit", out / "audit", dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    if (ws / "ledger.jsonl").exists():
+        shutil.copy2(ws / "ledger.jsonl", out / "ledger.jsonl")
+    # Budget, STOP, void and holdout history must not disappear on export. Scores
+    # retain ledger comparability; large calls/outputs are kept only when needed.
+    baseline = read_json(ws / "review" / "task_review.json")["snapshot"]["candidate"]
+    baseline_dir = ws / "candidates" / baseline
+    if baseline != candidate:
+        shutil.copytree(baseline_dir, out / "candidates" / baseline,
+                        ignore=shutil.ignore_patterns("__pycache__"))
+    for meta in list_runs(ws):
+        src = Path(meta["_dir"])
+        dest = out / "runs" / src.name
+        dest.mkdir(parents=True, exist_ok=True)
+        names = {"meta.json", "summary.json", "score.json"}
+        if src in runs:
+            names |= {"outputs.jsonl", "calls.jsonl"}
+        if meta.get("purpose") == "baseline":
+            names.add("outputs.jsonl")  # reproduce evaluation validation/noise
+        for name in names:
+            if (src / name).is_file():
+                shutil.copy2(src / name, dest / name)
+        if src not in runs:
+            # Incomplete runs may have incurred costs before summary.json was
+            # written. Keep each observed event, including unreported USD cost,
+            # without copying prompts, generated text or unrelated model inputs.
+            for call in read_jsonl(src / "calls.jsonl"):
+                control = {k: v for k, v in call.items() if k in {
+                    "seq", "unit_id", "tag", "cost_usd", "usage", "attempts", "attempt_errors",
+                    "error_kind", "stop_reason", "model_requested", "model_served", "backend",
+                    "wall_ms", "last_attempt_wall_ms", "api_ms"}}
+                append_jsonl(dest / "calls.jsonl", control)
+    # A brief stored inside WS is a reviewed design dependency too.
+    if ch.get("brief"):
+        brief = Path(ch["brief"])
+        brief = brief if brief.is_absolute() else ws / brief
+        if brief.is_file() and brief.resolve().is_relative_to(ws):
+            target = out / brief.resolve().relative_to(ws)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(brief, target)
+    external = [p for kind in ("inputs", "aux") for p in ch.get("data", {}).get(kind, [])
+                if not Path(p).resolve().is_relative_to(ws)]
+    if ch.get("brief") and not brief.resolve().is_relative_to(ws):
+        external.append(str(brief))
+    write_json(out / "replay.json", {
+        "version": 1, "source_workspace": str(ws), "candidate": candidate,
+        "reviewed_baseline": baseline, "external_dependencies": sorted(set(external)),
+        "retained_run_history": "all meta/summary/score and stripped call control events; selected runs include raw calls/outputs; baseline includes outputs",
+        "source_data_hashes": read_json(ws / "audit" / "quality_gate.json", {}).get("data_hashes", {}),
+    })
     built = ws / "data_built"
     if built.exists():
         shutil.copytree(built, out / "data_built", dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__"))
-    rec = recommend(ws, a.candidate, runs)
+    for kind in ("inputs", "aux"):
+        for source in ch.get("data", {}).get(kind, []):
+            source = Path(source).resolve()
+            if source.is_relative_to(ws):
+                if source == ws or out.is_relative_to(source):
+                    raise ValueError("an input directory contains the export destination; choose an external --out")
+                target = out / source.relative_to(ws)
+                if source.is_dir():
+                    shutil.copytree(source, target, dirs_exist_ok=True,
+                                    ignore=shutil.ignore_patterns("__pycache__"))
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, target)
+    review_dir = ws / "review"
+    if review_dir.exists():
+        shutil.copytree(review_dir, out / "review", dirs_exist_ok=True)
+    rec = recommend(ws, candidate, runs)
     write_json(out / "production_config.json", rec)
     copied = []
     for name in ("task_design.md", "report.md", "non_ai_findings.md", "experiment_plan.md"):
         if (ws / name).exists():
             shutil.copy2(ws / name, out / name)
             copied.append(name)
-    manifest = ["# Deliverables", "", f"generated {rec['generated']} from candidate `{a.candidate}`", "",
+    manifest = ["# Deliverables", "", f"generated {rec['generated']} from candidate `{candidate}`", "",
                 "| path | content |", "|---|---|",
-                f"| candidates/{a.candidate}/ | final pipeline code, prompts and config (workspace layout: "
+                f"| candidates/{candidate}/ | final pipeline code, prompts and config (workspace layout: "
                 "run_experiment.py works on this folder) |",
                 "| results/ | outputs and summaries of the full-scope / holdout runs passed to export |",
                 "| production_config.json | recommended settings with the measurements behind them |",
-                "| eval/, charter.json | dataset, splits, scorer, reference (provenance in eval/eval_spec.md) - "
+                "| eval/, charter.json | dataset, splits, scorer, reference (provenance in eval/reference_provenance.json) - "
                 "re-measure later with run_experiment.py on this folder after relocate_workspace.py |",
-                "| data_built/ | constructed task inputs (if the task was derived from raw data) |"]
+                "| data_built/ | constructed task inputs (if the task was derived from raw data) |",
+                "| audit/ | original data audit, gate and any user acceptance; hashes still enforced |",
+                "| ledger.jsonl, runs/ | original decisions, STOP, budget and holdout history plus baseline validation outputs |",
+                "| replay.json | original path mapping, retained history and external data/brief dependencies |"]
+    if review_dir.exists():
+        manifest += ["| review/ | independent task-design review, findings and recorded checks |"]
     manifest += [f"| {n} | |" for n in copied]
+    manifest += ["", "Run `relocate_workspace.py THIS_FOLDER --data-map OLD=NEW` before replay. Bundled workspace paths "
+                "are remapped automatically; external data/brief paths require a map when unavailable. Relocation "
+                "requires the same bytes and preserves review and audit decisions. Changed data requires a new audit "
+                "and review. Original STOP, time/budget and holdout limits continue to apply; export does not reset them.",
+                "", "Run metadata/summaries/scores and call control events (including unfinished costs) are retained "
+                "for all history; raw prompts/results of unrelated candidates are omitted. Re-scoring those omitted runs requires the original workspace."]
     missing = [n for n in ("task_design.md", "report.md") if n not in copied]
     if missing:
-        manifest += ["", f"Missing (write them in WS and re-run): {', '.join(missing)}"]
+        manifest += ["", f"Missing (write them in WS and export to a new destination): {', '.join(missing)}"]
     (out / "MANIFEST.md").write_text("\n".join(manifest) + "\n", encoding="utf-8")
     s = rec["settings"]
     print(f"deliverables -> {out}")
@@ -175,6 +290,20 @@ def main():
         print(f"  caveat: {c}")
     if missing:
         print(f"  missing: {missing}")
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("ws")
+    ap.add_argument("--candidate", required=True)
+    ap.add_argument("--runs", nargs="*")
+    ap.add_argument("--out")
+    a = ap.parse_args()
+    try:
+        export_workspace(a.ws, a.candidate, a.runs or None, a.out)
+    except (ValueError, OSError, KeyError) as e:
+        ap.exit(2, f"EXPORT REFUSED: {e}\n")
 
 
 if __name__ == "__main__":

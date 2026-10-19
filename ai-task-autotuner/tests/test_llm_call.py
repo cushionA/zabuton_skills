@@ -28,12 +28,15 @@ def proc(stdout, rc=0):
 
 class LlmCallTest(unittest.TestCase):
     def setUp(self):
+        self.environment = mock.patch.dict(llm_call.os.environ, {"AITT_BACKEND": "claude"})
+        self.environment.start()
         self.which = mock.patch.object(llm_call.shutil, "which", return_value="/bin/claude")
         self.which.start()
         self.sleep = mock.patch.object(llm_call.time, "sleep")
         self.sleep.start()
 
     def tearDown(self):
+        self.environment.stop()
         self.which.stop()
         self.sleep.stop()
 

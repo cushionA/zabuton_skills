@@ -1,7 +1,9 @@
 """One model call, measured the same way on every backend.
 
 Backends:
-  cli  - `claude -p` (Claude Code subscription; the default API substitute)
+  auto - choose the current Codex/Claude host, or the sole installed CLI
+  codex - `codex exec` (Luna by default)
+  claude / cli - `claude -p` (Haiku by default; cli is a legacy alias)
   api  - Anthropic Messages API via the official `anthropic` SDK (needs credentials)
 
 Every call returns a record with text, usage (input/output/cache/thinking tokens),
@@ -10,11 +12,12 @@ be compared on the same footing. Usage that a backend does not report is None
 (never guessed).
 
 CLI:
-  python llm_call.py --calibrate [--backend cli] [--model haiku]
-  python llm_call.py --model haiku --effort low --system-file sys.txt < prompt.txt
+  python llm_call.py --calibrate [--backend codex|claude] [--model MODEL]
+  python llm_call.py --effort low --system-file sys.txt < prompt.txt
 """
 import argparse
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -24,8 +27,11 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import MODEL_ALIASES, estimate_cost, extract_json, sha256_text  # noqa: E402
+from codex_backend import attempt as _codex_attempt  # noqa: E402
 
 DEFAULT_SYSTEM = "Follow the user's instructions exactly."
+BACKENDS = ("auto", "codex", "claude", "cli", "api")
+DEFAULT_MODELS = {"codex": "gpt-6-luna", "claude": "haiku", "api": "haiku"}
 RETRYABLE_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
 # Subscription/session quota exhaustion: retrying only burns time until the reset.
 QUOTA_MARKERS = ("session limit", "usage limit", "hit your limit", "limit reached", "resets ")
@@ -41,6 +47,43 @@ CLI_ISOLATION = [
     "--no-session-persistence",
     "--exclude-dynamic-system-prompt-sections",
 ]
+
+
+def resolve_backend(backend="auto"):
+    """Resolve once before a run; never switch providers after a failed call."""
+    backend = backend or "auto"
+    if backend not in BACKENDS:
+        raise ValueError(f"unknown backend {backend!r}; choose {', '.join(BACKENDS)}")
+    if backend != "auto":
+        return "claude" if backend == "cli" else backend
+    override = os.environ.get("AITT_BACKEND")
+    if override:
+        if override == "auto" or override not in BACKENDS:
+            raise ValueError("AITT_BACKEND must be codex, claude, cli or api")
+        return resolve_backend(override)
+    claude_host = any(os.environ.get(k) for k in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"))
+    codex_host = any(os.environ.get(k) for k in ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "CODEX_CAAS_SESSION_ID"))
+    if claude_host and codex_host:
+        raise ValueError("both Codex and Claude host markers are present; set --backend or AITT_BACKEND explicitly")
+    if claude_host:
+        return "claude"
+    if codex_host:
+        return "codex"
+    installed = [name for name in ("codex", "claude") if shutil.which(name)]
+    if len(installed) == 1:
+        return installed[0]
+    if installed:
+        raise ValueError("both CLIs are installed outside a detected host; set --backend or AITT_BACKEND explicitly")
+    raise ValueError("no Codex/Claude CLI found; install one or select --backend api explicitly")
+
+
+def resolve_model(model, backend):
+    backend = resolve_backend(backend)
+    if model is None or model == "auto":
+        return DEFAULT_MODELS[backend]
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("model must be a non-empty model id or auto")
+    return "gpt-6-luna" if backend == "codex" and model == "luna" else model
 
 
 def _child_env():
@@ -197,48 +240,96 @@ def _api_attempt(prompt, system, model, effort, json_schema, timeout, max_tokens
     return rec
 
 
-def call(prompt, system=None, *, backend="cli", model="haiku", effort=None, max_tokens=None,
+def call(prompt, system=None, *, backend="auto", model=None, effort=None, max_tokens=None,
          json_schema=None, expect_json=False, timeout=300, retries=2, cache_system=True,
-         thinking="off", extra_args=None):
+         thinking="off", extra_args=None, before_attempt=None, on_attempt=None):
     """Run one model call with retries; always returns a record (never raises).
 
     thinking="off" disables thinking where the api backend allows it (Haiku 5.5, Sonnet 5.5
     at effort <= high); the cli backend cannot turn adaptive thinking off - use effort "low"
-    and read usage.thinking.
+    and read usage.thinking. The runner may supply before_attempt() (an optional
+    remaining-time cap in seconds) and on_attempt(record) to enforce limits
+    between physical retries without changing logical-call accounting.
     """
     system = system or DEFAULT_SYSTEM
     total = _empty_usage()
     any_usage = False
+    missing_usage = set()
     cost = 0.0
+    cost_complete = True
     attempt_errors = []
     t_start = time.time()
     rec = {}
     attempts = 0
+    backend_requested = backend
+    resolution_error = None
+    try:
+        backend = resolve_backend(backend)
+        model = resolve_model(model, backend)
+    except ValueError as e:
+        resolution_error = str(e)
     for attempt in range(retries + 1):
+        attempt_timeout = timeout
+        remaining = None
+        if before_attempt is not None and not resolution_error:
+            try:
+                remaining = before_attempt()
+                if remaining is not None:
+                    if (not isinstance(remaining, (int, float)) or isinstance(remaining, bool)
+                            or not math.isfinite(remaining) or remaining <= 0):
+                        raise RuntimeError("no execution time remains")
+                    attempt_timeout = min(timeout, remaining)
+            except Exception as e:
+                rec = dict(rec, ok=False, error_kind="harness", error=f"execution policy: {e}",
+                           retryable=False, policy_refused=True, text=None, structured=None, stop_reason=None)
+                break
         attempts += 1
-        if backend == "api":
-            rec = _api_attempt(prompt, system, model, effort, json_schema, timeout, max_tokens, cache_system,
+        attempt_start = time.monotonic()
+        if resolution_error:
+            rec = {"ok": False, "error_kind": "harness", "error": resolution_error, "retryable": False}
+        elif backend == "api":
+            rec = _api_attempt(prompt, system, model, effort, json_schema, attempt_timeout, max_tokens, cache_system,
                                thinking)
+        elif backend == "codex":
+            rec = _codex_attempt(prompt, system, model, effort, json_schema, attempt_timeout, extra_args,
+                                 max_tokens=max_tokens, thinking=thinking)
         else:
-            rec = _cli_attempt(prompt, system, model, effort, json_schema, timeout, extra_args)
+            rec = _cli_attempt(prompt, system, model, effort, json_schema, attempt_timeout, extra_args)
         if rec.get("usage") is not None:
             any_usage = True
             _add_usage(total, rec["usage"])
+            missing_usage.update(k for k in total if rec["usage"].get(k) is None)
+        else:
+            missing_usage.update(total)
         if rec.get("cost_usd") is not None:
             cost += rec["cost_usd"]
+        else:
+            cost_complete = False
+        if on_attempt is not None and not resolution_error:
+            try:
+                on_attempt(rec)
+            except Exception as e:
+                rec = dict(rec, ok=False, error_kind="harness", error=f"execution accounting: {e}",
+                           retryable=False, policy_refused=True, text=None, structured=None, stop_reason=None)
         if rec.get("ok") or not rec.get("retryable"):
             break
         if rec.get("error_kind") == "empty" and attempts >= 2:
             break  # one retry is enough for empty replies; then it is the model's answer
         attempt_errors.append(rec.get("error"))
         if attempt < retries:
-            time.sleep(min(30, 2 ** (attempt + 1)) * (0.75 + 0.5 * (time.time() % 1)))
+            delay = min(30, 2 ** (attempt + 1)) * (0.75 + 0.5 * (time.time() % 1))
+            if remaining is not None:
+                delay = min(delay, max(0.0, remaining - (time.monotonic() - attempt_start)))
+            time.sleep(delay)
+    for k in missing_usage:
+        total[k] = None
     out = {
-        "backend": backend, "model_requested": model, "model_served": rec.get("model_served"),
+        "backend": backend, "backend_requested": backend_requested,
+        "model_requested": model, "model_served": rec.get("model_served"),
         "effort": effort, "thinking": thinking, "ok": bool(rec.get("ok")), "error_kind": rec.get("error_kind"),
         "error": rec.get("error"), "text": rec.get("text"), "structured": rec.get("structured"),
         "stop_reason": rec.get("stop_reason"), "usage": total if any_usage else None,
-        "cost_usd": cost if any_usage else None, "cost_basis": rec.get("cost_basis"),
+        "cost_usd": cost if cost_complete else None, "cost_basis": rec.get("cost_basis") if cost_complete else None,
         "api_ms": rec.get("api_ms"), "wall_ms": int((time.time() - t_start) * 1000),
         "last_attempt_wall_ms": rec.get("wall_ms"), "ttft_ms": rec.get("ttft_ms"),
         "num_turns": rec.get("num_turns"), "attempts": attempts,
@@ -246,6 +337,12 @@ def call(prompt, system=None, *, backend="cli", model="haiku", effort=None, max_
         "prompt_sha": sha256_text(prompt)[:16], "system_sha": sha256_text(system)[:16],
         "t_start": t_start,
     }
+    for key in ("thread_id", "unsupported_settings", "policy_refused"):
+        if key in rec:
+            out[key] = rec[key]
+    if backend == "codex":
+        out["unsupported_settings"] = [k for k, value in (("max_tokens", max_tokens), ("thinking", thinking))
+                                       if value is not None]
     if out["ok"] and out["stop_reason"] == "max_tokens":
         out["error_kind"] = "truncated"
     if expect_json:
@@ -261,15 +358,16 @@ def is_harness_failure(rec):
     return (not rec.get("ok")) and rec.get("error_kind") in ("timeout", "api", "harness", "quota")
 
 
-def calibrate(backend="cli", model="haiku", n=3):
+def calibrate(backend="auto", model=None, n=3):
     """Measure the fixed per-call overhead of the backend with a trivial prompt."""
     rows = []
     for _ in range(n):
         r = call('Reply with {"ok": true}', "Reply with JSON only.", backend=backend, model=model,
                  effort="low", expect_json=True, retries=1, timeout=120)
         u = r["usage"] or {}
-        rows.append({"ok": r["ok"], "input_side": (u.get("input") or 0) + (u.get("cache_read") or 0)
-                     + (u.get("cache_write") or 0), "cache_read": u.get("cache_read"),
+        counts = [u.get(k) for k in ("input", "cache_read", "cache_write")]
+        rows.append({"ok": r["ok"], "input_side": sum(counts) if all(v is not None for v in counts) else None,
+                     "cache_read": u.get("cache_read"),
                      "wall_ms": r["wall_ms"], "api_ms": r["api_ms"], "served": r["model_served"],
                      "cost_usd": r["cost_usd"]})
     return rows
@@ -277,8 +375,8 @@ def calibrate(backend="cli", model="haiku", n=3):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--backend", default="cli", choices=["cli", "api"])
-    ap.add_argument("--model", default="haiku")
+    ap.add_argument("--backend", default="auto", choices=BACKENDS)
+    ap.add_argument("--model", help="default: gpt-6-luna for Codex, haiku for Claude/API")
     ap.add_argument("--effort")
     ap.add_argument("--system-file")
     ap.add_argument("--json", action="store_true", help="parse JSON from the reply")

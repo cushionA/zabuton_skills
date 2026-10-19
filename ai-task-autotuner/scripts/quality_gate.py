@@ -31,7 +31,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import append_jsonl, hash_paths, now_iso, read_json, read_jsonl, sha256_file, write_json  # noqa: E402
+from common import append_jsonl, hash_paths, now_iso, read_json, read_jsonl, sha256_file, sha256_text, write_json  # noqa: E402
 
 SEVERITIES = ("critical", "high", "medium", "low", "info")
 STATUS_EXIT = {"PASS": 0, "REVIEW": 2, "STOP": 3, "INCOMPLETE": 5}
@@ -108,6 +108,40 @@ def _clock(ws, action, reason):
                                                  "at": now_iso(), "epoch": time.time()})
 
 
+def _blocking_findings(gate):
+    """Keep every finding field and duplicate; order alone is not a new defect."""
+    return sorted((f for f in gate.get("findings", [])
+                   if not f.get("known") and f.get("severity") in ("critical", "high")),
+                  key=lambda f: json.dumps(f, sort_keys=True, ensure_ascii=False))
+
+
+def _scope_sha(scope):
+    return sha256_text(json.dumps(scope, sort_keys=True, ensure_ascii=False))
+
+
+def _same_review(old, gate):
+    """Whether the recorded acceptance describes exactly this audited REVIEW.
+
+    A finding ID identifies a kind of problem, not the records/evidence the user
+    accepted. Bind modern approvals to their full audit snapshot. Legacy gates
+    can prove equivalence only from fields they actually stored; the abbreviated
+    close-read summary cannot prove that its underlying evidence is unchanged.
+    """
+    if old.get("status") != "REVIEW" or gate.get("status") != "REVIEW":
+        return False
+    if old.get("review_scope") is not None:
+        old_sha = _scope_sha(old["review_scope"])
+        accepted_sha = (old.get("waiver") or {}).get("scope_sha256")
+        return (accepted_sha is None or accepted_sha == old_sha) and old_sha == _scope_sha(gate["review_scope"])
+    old_blocking = _blocking_findings(old)
+    if any(f.get("id") == "close-read-defects" for f in old_blocking):
+        return False
+    return (bool(old.get("data_hashes")) and bool(old.get("checks_sha"))
+            and old_blocking == _blocking_findings(gate)
+            and old["data_hashes"] == gate["data_hashes"]
+            and old["checks_sha"] == gate["checks_sha"])
+
+
 def evaluate(ws):
     ws = Path(ws)
     charter = read_json(ws / "charter.json", {})
@@ -135,6 +169,19 @@ def evaluate(ws):
     gate = {"status": status, "created": now_iso(), "counts": counts, "findings": findings,
             "data_hashes": hash_paths(existing), "checks_sha": sha256_file(checks_path) if checks_path.exists() else None,
             "waiver": None}
+    # The displayed close-read finding abbreviates evidence to five records and
+    # 80 characters each. Approval must cover the complete underlying defects.
+    defects = [r for r in read_jsonl(ws / "audit" / "close_read.jsonl") if r.get("verdict") == "defect"]
+    gate["review_scope"] = {
+        "version": 1,
+        "findings": _blocking_findings(gate),
+        "data_hashes": gate["data_hashes"],
+        "data_sources": {"inputs": sorted(str(p) for p in ctx.inputs),
+                         "aux": sorted(str(p) for p in ctx.aux)},
+        "checks_sha": gate["checks_sha"],
+        "close_read_defects": sorted(defects, key=lambda r: json.dumps(r, sort_keys=True, ensure_ascii=False))
+        if any(f.get("id") == "close-read-defects" for f in _blocking_findings(gate)) else [],
+    }
     return gate
 
 
@@ -184,7 +231,12 @@ def main():
         gate = read_json(path)
         if not gate or gate["status"] != "REVIEW":
             sys.exit("no REVIEW gate to accept")
-        gate["waiver"] = {"reason": a.accept_review, "at": now_iso()}
+        current = evaluate(a.ws)
+        if not _same_review(gate, current):
+            sys.exit("audit findings or data changed since the REVIEW; re-run quality_gate.py before accepting")
+        gate = current
+        gate["waiver"] = {"reason": a.accept_review, "at": now_iso(),
+                          "scope_sha256": _scope_sha(gate["review_scope"])}
         write_json(path, gate)
         _clock(a.ws, "resume", "user accepted REVIEW")
         print("REVIEW accepted and recorded; time-limit clock resumed")
@@ -192,10 +244,9 @@ def main():
     old = read_json(path)
     gate = evaluate(a.ws)
     if old and old.get("waiver") and gate["status"] == "REVIEW":
-        blocking = {f["id"] for f in gate["findings"] if not f.get("known") and f["severity"] in ("critical", "high")}
-        old_blocking = {f["id"] for f in old["findings"] if not f.get("known") and f["severity"] in ("critical", "high")}
-        if blocking <= old_blocking:
-            gate["waiver"] = dict(old["waiver"], carried_over=now_iso())
+        if _same_review(old, gate):
+            gate["waiver"] = dict(old["waiver"], carried_over=now_iso(),
+                                  scope_sha256=_scope_sha(gate["review_scope"]))
             print("REVIEW findings unchanged: the user's earlier acceptance still applies")
     write_json(path, gate)
     if gate["status"] == "REVIEW" and gate.get("waiver"):

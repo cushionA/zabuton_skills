@@ -64,6 +64,13 @@ inconvenient units, or mark an issue `known` just to pass. Only the user can acc
 acceptance resumes it. If the data changes, re-run the audit; runs refuse to start when input
 hashes differ from the gate.
 
+A recorded REVIEW acceptance carries forward only when the substantive blocking findings,
+audited data and check code are identical. A finding id is not the accepted scope: new affected
+records, evidence or severity under the same id invalidate the old acceptance. Older close-read
+gates stored only truncated defect details, so they need one fresh audit and, if still REVIEW,
+fresh user acceptance; the new snapshot preserves the complete defect scope for later checks.
+This applies only to genuine data issues, not routine design-review fixes.
+
 ## Scope decisions
 
 Record in `charter.json` (`data.scope_notes`) and the audit: what is in scope, what is
