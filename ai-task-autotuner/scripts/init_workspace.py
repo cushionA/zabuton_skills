@@ -85,7 +85,9 @@ def main():
         if not (ws / name).exists():
             (ws / name).write_text(text, encoding="utf-8")
     (ws / "ledger.jsonl").touch()
-    (ws / "runs").mkdir(exist_ok=True)
+    # empty dirs are not kept by git, so create them here rather than relying on the template
+    for d in ("runs", "eval/reference"):
+        (ws / d).mkdir(parents=True, exist_ok=True)
     print(f"workspace ready: {ws}")
     print("next: profile_data.py -> audit/checks.py + data_audit.md -> quality_gate.py "
           "-> experiment_plan.md + eval/ -> baseline x2 -> validate_eval.py -> loop")
