@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "prepared_on": "2026-10-20",
+  "timezone": "Asia/Tokyo",
+  "source": "Original user uploads in this chat, copied byte-for-byte",
+  "archives": [
+    {
+      "path": "ai-task-autotuner-review-20261019.zip",
+      "sha256": "c55490d4a6d61587ac7bd8001cd5d06bf289031a418895af2f576a27efbd26b9",
+      "size_bytes": 375219,
+      "file_count": 170,
+      "uncompressed_bytes": 738343,
+      "root": "ai-task-autotuner-review-20261019"
+    },
+    {
+      "path": "ai-task-autotuner-testdata-20261019.zip",
+      "sha256": "8f3841f7ca1c6b6cb0e415151344d10dc3ad13ec15bdfb9b04fa49a896e83609",
+      "size_bytes": 21336169,
+      "file_count": 795,
+      "uncompressed_bytes": 100113313,
+      "root": "ai-task-autotuner-testdata-20261019"
+    }
+  ],
+  "evidence": [
+    {
+      "path": "evidence/snapshot-harness-review-evidence.json",
+      "size_bytes": 2549,
+      "sha256": "e0b95216e3af8260c15272811c010f128f6e79ad31da1dbdf2401978cc64b7ac"
+    },
+    {
+      "path": "evidence/skill-control-contract-evidence.json",
+      "size_bytes": 1327,
+      "sha256": "76dbaa8c336dbea6f4baacd0c8a6b0ea31d3fb85c83fdac194a2b4d8a984cba4"
+    },
+    {
+      "path": "evidence/skill-eval-contract-evidence.json",
+      "size_bytes": 582,
+      "sha256": "dc8ab6ceec4fdc7cecaab265d2426b3782e75e8f6c3e5412df9168605fd1c3b0"
+    },
+    {
+      "path": "evidence/raw-review-summary-20261019.json",
+      "size_bytes": 17834,
+      "sha256": "81db2d3106f6a020e67e6ec8589756d73f6ca97229f8e6316ac4121ec91bea3a"
+    },
+    {
+      "path": "evidence/raw-review-coverage-summary.json",
+      "size_bytes": 2496,
+      "sha256": "dff5b5e0aa6cfe42e8900a1be5fc0e41a31978bbb84fe760e80c7cbd7d76910f"
+    },
+    {
+      "path": "evidence/raw-review-output-integrity-summary.json",
+      "size_bytes": 1523,
+      "sha256": "cb79cc207567ef1e4ea820262b38dcc088982ac5bcc8fab7e81ae850b9728e4d"
+    },
+    {
+      "path": "evidence/review_snapshot_harness.py",
+      "size_bytes": 7528,
+      "sha256": "ae11f292d06e4904da174b467254bc81d32a3a21f4e8c23b0d384a4b5671e855"
+    },
+    {
+      "path": "evidence/skill-eval-contract-repro.py",
+      "size_bytes": 3867,
+      "sha256": "08e9da9ef9cf687a50c14a7e39fbf71135f3409d4e469ec0e86cc1e203ac4caf"
+    },
+    {
+      "path": "evidence/raw-review-sku-recompute.py",
+      "size_bytes": 9927,
+      "sha256": "f38cee46e372bdbfff4f289d3b4ed5b439392613045b228e8dd9846ed3b943b3"
+    },
+    {
+      "path": "evidence/raw-review-product-recompute.py",
+      "size_bytes": 9794,
+      "sha256": "341fccdd8b0b0f7ec924b471f7d116b6a182a82e16db1a55335e03f22b867472"
+    },
+    {
+      "path": "evidence/raw-review-shortcuts-analyze.py",
+      "size_bytes": 6315,
+      "sha256": "4e369b799e98d9c8ff804c8e33a0fd351652144569fe81c0963e09b7faf3af52"
+    },
+    {
+      "path": "evidence/raw-review-output-integrity.py",
+      "size_bytes": 5776,
+      "sha256": "904aaccba3a87af3359da9f612729fcf091e9fcf0881f3e0cd2476310a0cb555"
+    }
+  ],
+  "nested_source_archive": {
+    "path": "ai-task-autotuner-testdata-20261019/inputs/sku-product-volume-normal-v1.zip",
+    "sha256": "d3c2ddcd86da0d110dd51f37f18eb4a27143a1bde7ee3d08c8b5c95e5a2462f2",
+    "file_count": 538,
+    "extract_to": "ai-task-autotuner-testdata-20261019/inputs/sku-normal-v1"
+  },
+  "content_check": {
+    "provider_private_keys": 0,
+    "private_keys": 0,
+    "jwt_or_authorization_tokens": 0,
+    "refresh_tokens": 0,
+    "unsafe_archive_paths": 0,
+    "archive_symlinks": 0,
+    "notes": "Public storefront HTML contains browser-side API configuration keys; no user-specific credentials or personal account fields were found. This is a bounded pattern/content check, not a guarantee."
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "source_root": "/workspace/scratch/ai-task-autotuner-testdata-20261019",
+  "task1": {
+    "valid_runs": 24,
+    "void_runs": 3,
+    "last_valid_run_ended": "2026-10-18T16:23:49+0000",
+    "last_ledger_event": "E006 discard at 2026-10-18T16:20:38+0000",
+    "candidate_dirs": [
+      "c000-baseline",
+      "c001-rules",
+      "c002-spec-rules",
+      "c003-option-scope",
+      "c004-effort-medium",
+      "c005-cond-anchor",
+      "p001-sonnet-probe",
+      "ref-opus",
+      "ref-opus-v2"
+    ],
+    "final_c012_run_present": false,
+    "E013_run_present": false,
+    "final_report_present": false,
+    "final_deliverables_present": false,
+    "raw_eval_hash": "65ac634e45418016",
+    "reviewer_packet_eval_hash": "fd3da7a9b3f3ab8e",
+    "raw_reference_files_rows": {
+      "dev.jsonl": 585,
+      "dev.adjudicated.jsonl": 90,
+      "dev.disagreements.jsonl": 57,
+      "holdout.jsonl": 544
+    },
+    "reference_snapshot_difference": "Reviewer packet v3 adds acceptable {matched, conditional} on raw-2fc336c20bf4ad86 (10 rows); holdout reference stated untouched. Raw archive remains v2.",
+    "search_scope": "All paths and metadata in archive, including deliverables, without_skill, runs_void. Literal c012 token occurs in source product identifiers, not final candidate/run records."
+  },
+  "task2": {
+    "valid_runs": 23,
+    "void_runs": 1,
+    "last_valid_run_ended": "2026-10-18T16:23:20+0000",
+    "last_ledger_event": "clock resume at 2026-10-18T23:26:27+0000",
+    "final_c007_holdout_run": "E008__holdout__holdout__20261018-161500499",
+    "final_c007_holdout_unit_count": 148,
+    "final_c007_holdout_scored_count": 142,
+    "final_c007_full_run": "c007-no-desc__full__full__20261018-162045560",
+    "final_c007_full_unit_count": 304,
+    "final_c007_full_scored_count": 298,
+    "full_calls": 249,
+    "full_rule_decided": 55,
+    "report_and_pipeline_match_reviewer_packet": true,
+    "raw_eval_hash": "91410e1aa3befcf2",
+    "reference_files": "eval/reference and deliverables/testset/reference directories contain no files; labels derive from query data/pairlist"
+  },
+  "run_output_completeness": {
+    "valid_runs_checked": 47,
+    "mismatched_meta_vs_output_id_sets": 0,
+    "duplicate_output_ids": 0
+  },
+  "comparisons": {
+    "without_skill_task1": "A0_dev log only, 72 products, 942 SKU rows, 594 failed. No final report.",
+    "without_skill_task2": "final_message says no Haiku call, $0, awaiting data/label-policy response. No completed metric comparison."
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "experiment_candidate_mismatch": {
+    "proposed_candidate": "c003-broken",
+    "executed_candidate": "c002-llm",
+    "decision_candidate": "c003-broken",
+    "decision": "keep",
+    "primary": 1.0,
+    "bad_pipeline_expected_primary": 0.3333333333333333,
+    "best": "c003-broken"
+  },
+  "zero_budget_ignored": {
+    "recommendation": [
+      "STOP",
+      "limit reached: cost $0.00 >= $0 -> finalize (holdout, full run, report)"
+    ],
+    "run_completed": true,
+    "model_calls": 6,
+    "charged_mock_cost": 0.0006000000000000001
+  },
+  "minimize_target": {
+    "direction": "min",
+    "current_error": 1.0,
+    "target_error": 0.01,
+    "actual_recommendation": [
+      "SWITCH_PHASE",
+      "quality target reached -> ledger.py phase WS efficiency"
+    ]
+  },
+  "minimize_floor": {
+    "before_error": 1.0,
+    "min_delta": 0.05555555555555555,
+    "automatic_floor": 0.9444444444444444,
+    "unchanged_error_accepted": false,
+    "actual_same_quality_half_cost_decision": {
+      "decision": "discard",
+      "reason": "primary 1.0000 below floor 0.9444444444444444; unit-bootstrap 95% CI [-0.0000, -0.0000]",
+      "primary": 1.0,
+      "eff_ratio": 0.5
+    }
+  },
+  "stop_ignored": {
+    "recommendation": [
+      "STOPPED",
+      "user requested stop"
+    ],
+    "run_completed": true,
+    "model_calls": 6
+  }
+}

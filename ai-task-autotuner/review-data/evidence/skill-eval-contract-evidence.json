@@ -1,0 +1,32 @@
+{
+  "data_correction": {
+    "same_eval_hash": true,
+    "validation_ok_after_reaudit": [
+      true,
+      ""
+    ],
+    "old_run_stale_flags": [
+      false,
+      false
+    ],
+    "old_primary": 0.6666666666666666,
+    "same_candidate_new_data_primary": 1.0
+  },
+  "effective_config_mixing": {
+    "candidate_hash_equal": true,
+    "models_in_runs": [
+      "haiku",
+      "sonnet"
+    ],
+    "primaries": [
+      0.6666666666666666,
+      1.0
+    ],
+    "run_stale_flags": [
+      false,
+      false
+    ],
+    "pooled_primary": 0.8333333333333333,
+    "pooled_n_runs": 2
+  }
+}

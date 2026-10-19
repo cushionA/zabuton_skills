@@ -1,0 +1,39 @@
+{
+  "scope": "Stored calls only, no LLM invocation. Task 1 c000-c005/E001-E006 snapshot; no c012 logs. Task 2 final c007 available.",
+  "task1_measured_calls": 500,
+  "task1_measured_rows": 6420,
+  "task1_duplicate_r": 0,
+  "task1_bad_x_u_e_types": 0,
+  "task1_definite_oob_evidence": [
+    {
+      "candidate": "c005-cond-anchor",
+      "run": "E006__dev__experiment__r2__20261018-161845258",
+      "unit": "raw-ef29c76517a4b100",
+      "r": "R0",
+      "ref": "rd1",
+      "input_rakuten_description_line_count": 0,
+      "output_status": "ok",
+      "score": 1.0,
+      "gate_failures": [],
+      "output_path": "/workspace/scratch/ai-task-autotuner-testdata-20261019/iteration-1/eval-1-sku-matching-no-labels/with_skill/outputs/ws/runs/E006__dev__experiment__r2__20261018-161845258/outputs.jsonl",
+      "output_line": 23
+    }
+  ],
+  "task1_conditional_rows_by_candidate": {
+    "c000-baseline": 57,
+    "c002-spec-rules": 153,
+    "c003-option-scope": 87,
+    "c004-effort-medium": 178,
+    "c005-cond-anchor": 96
+  },
+  "task1_conditional_missing_options_reason_or_row_evidence": 0,
+  "task1_early_baseline_state_caveat": "c000 prompt accepts arbitrary state; 102 conditional options had freeform state. Later c002-c005 options all use include/exclude. Do not label c000 as violation of final c012 prompt.",
+  "task2_final_c007_choice_seen": 754,
+  "task2_final_c007_nonstring_choices": 0,
+  "task2_final_c007_choice_by_purpose": {
+    "confirm": 128,
+    "experiment": 256,
+    "holdout": 121,
+    "full": 249
+  }
+}

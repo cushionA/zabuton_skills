@@ -1,0 +1,134 @@
+{
+  "missing_reference": {
+    "passed": true,
+    "reference": [
+      {
+        "check": "reference",
+        "ok": true,
+        "required": true,
+        "detail": {
+          "covered": 3,
+          "total": 6,
+          "unresolved": 0
+        }
+      }
+    ],
+    "holdout_reference_exists": false
+  },
+  "items_null": {
+    "exception": "TypeError: 'NoneType' object is not iterable"
+  },
+  "duplicate_keys": {
+    "primary": 1.0,
+    "gate_failures": []
+  },
+  "waiver_reuse": {
+    "allows": [
+      true,
+      "REVIEW"
+    ],
+    "affected": [
+      [
+        "u01",
+        "u02"
+      ]
+    ],
+    "waiver": {
+      "reason": "user accepted A",
+      "at": "2026-10-19T14:13:14+0000",
+      "carried_over": "2026-10-19T14:13:14+0000"
+    }
+  },
+  "replaced_input": {
+    "changed": [],
+    "allows": [
+      true,
+      "REVIEW"
+    ]
+  },
+  "added_input": {
+    "changed": []
+  },
+  "pooling": {
+    "before": {
+      "units": 2,
+      "band": 1.0,
+      "ci": [
+        0.0,
+        1.0
+      ]
+    },
+    "after": {
+      "units": 20,
+      "band": 0.31622776601683794,
+      "ci": [
+        0.3,
+        0.7
+      ]
+    }
+  },
+  "zero_cost_decision": {
+    "event": "decide",
+    "exp": "E002",
+    "at": "2026-10-19T14:13:15+0000",
+    "split": "dev",
+    "phase": "efficiency",
+    "candidate": "c002-llm",
+    "lever": "deterministic.pre",
+    "runs": [
+      "E002"
+    ],
+    "primary": 1.0,
+    "metrics": {},
+    "eff_metric": "cost_usd_per_unit",
+    "eff": 0.0,
+    "ai_free": true,
+    "delta": 0.0,
+    "min_delta": 1.0,
+    "paired": {
+      "n": 1,
+      "units": 1,
+      "improved": 0,
+      "regressed": 0,
+      "units_improved": 0,
+      "units_regressed": 0,
+      "band": 0.0,
+      "ci": [
+        0.0,
+        0.0
+      ],
+      "p": 1.0
+    },
+    "eff_ratio": null,
+    "best_exp": "E001",
+    "decision": "discard",
+    "reason": "no efficiency gain >= 10% (ratio None); unit-bootstrap 95% CI [+0.0000, +0.0000]"
+  },
+  "unknown_cost": {
+    "call_cost_usd": 0.0,
+    "summary_cost_usd": 0.0,
+    "cost_complete": true
+  },
+  "holdout_purpose_bypass": {
+    "call_count": 6,
+    "meta_split": "holdout",
+    "meta_purpose": "baseline",
+    "cap": 0
+  },
+  "quota_semaphore": {
+    "call_count": 6,
+    "max_parallel_calls": 1,
+    "quota_hit": true
+  },
+  "setup_timing": {
+    "elapsed_s": 0.309,
+    "run_wall_s": 0.0018329620361328125
+  },
+  "export_gate": {
+    "exists": false,
+    "allows": [
+      false,
+      "no audit/quality_gate.json - run the data audit and quality_gate.py first"
+    ]
+  }
+}

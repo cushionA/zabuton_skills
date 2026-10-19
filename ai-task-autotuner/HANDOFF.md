@@ -1,5 +1,10 @@
 # 引き継ぎ: AI Task Autotuner（開発ブランチ `claude/keen-edison-8il7ag`）
 
+> 2026-10-20追記: 本書は初期開発時の記録です。今回のレビュー・修正・CLI切り替えと
+> 未解決点は [ASTRA_HANDOFF.md](ASTRA_HANDOFF.md)、元データと証拠は
+> [review-data/README.md](review-data/README.md) を参照してください。以下のテスト件数・
+> 既定値・データの保管先は当時の情報です。
+
 2026-10-18〜19 の作業の引き継ぎ。main に取り込むときは、このファイルを残すか削除するか決めること（スキルの動作には関係しない）。
 
 ## 1. これは何か

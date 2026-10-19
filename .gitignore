@@ -30,6 +30,9 @@ __pycache__/
 .venv/
 venv/
 
+# Astra引き継ぎ用の元ZIPは追跡し、ローカル展開した重複データは追跡しない。
+ai-task-autotuner/review-data/unpacked/
+
 # OS
 Thumbs.db
 desktop.ini
