@@ -61,9 +61,12 @@ if __name__ == "__main__":
     a = ap.parse_args()
     if a.make_splits:
         units = load_units("all")
+        # units close-read during the audit go to dev (their content is already in your context)
+        close_read = [r["id"] for r in map(json.loads, open(WS / "audit" / "close_read.jsonl", encoding="utf-8"))
+                      if r.get("id")] if (WS / "audit" / "close_read.jsonl").exists() else []
         sp = make_splits([u["id"] for u in units], a.dev, a.holdout, a.seed,
                          groups={u["id"]: group_of(u) for u in units},
-                         strata={u["id"]: stratum_of(u) for u in units})
+                         strata={u["id"]: stratum_of(u) for u in units}, force_dev=close_read)
         sp["full"] = [u["id"] for u in units]
         write_json(WS / "eval" / "splits.json", sp)
         print({k: len(v) for k, v in sp.items()})

@@ -215,32 +215,56 @@ def confusion(pairs):
     return table
 
 
-def paired_items(items_a, items_b):
-    """Compare two item lists ({id, score}) on shared ids.
+def paired_items(items_a, items_b, n_boot=1000, seed=0):
+    """Compare two item lists ({id, unit?, score}) on shared ids.
 
-    Returns dict(n, improved, regressed, delta_mean, band, p) where band is a 95%
-    half-width of the paired mean difference (2*sqrt(sum d^2)/n): an approximate
-    noise floor when a and b are repeated runs of the same candidate.
+    Items inside one unit (a product, a document) are correlated: a whole unit often flips
+    between identical runs. So the noise band and the interval are computed over units:
+      band = 2*sqrt(sum_u S_u^2)/n   (S_u = summed item differences in unit u)
+      ci   = unit-level bootstrap 95% interval of the mean difference
+    When items carry no unit, each item is its own unit (the independent-item case).
+    For two repeated runs of one candidate, band is the noise floor.
     """
-    a = {i["id"]: i.get("score", 0.0) for i in items_a}
-    b = {i["id"]: i.get("score", 0.0) for i in items_b}
+    a = {i["id"]: i for i in items_a}
+    b = {i["id"]: i for i in items_b}
     ids = sorted(set(a) & set(b))
-    diffs = [b[k] - a[k] for k in ids]
     n = len(ids)
     if n == 0:
-        return {"n": 0, "improved": 0, "regressed": 0, "delta_mean": None, "band": None, "p": 1.0}
-    improved = sum(1 for d in diffs if d > 1e-9)
-    regressed = sum(1 for d in diffs if d < -1e-9)
-    band = 2 * math.sqrt(sum(d * d for d in diffs)) / n
+        return {"n": 0, "improved": 0, "regressed": 0, "delta_mean": None, "band": None, "p": 1.0,
+                "ci": (None, None), "units": 0, "improved_ids": [], "regressed_ids": []}
+    diffs = {k: b[k].get("score", 0.0) - a[k].get("score", 0.0) for k in ids}
+    unit_sum, unit_n = {}, {}
+    for k in ids:
+        u = b[k].get("unit") or a[k].get("unit") or k
+        unit_sum[u] = unit_sum.get(u, 0.0) + diffs[k]
+        unit_n[u] = unit_n.get(u, 0) + 1
+    units = list(unit_sum)
+    improved = [k for k in ids if diffs[k] > 1e-9]
+    regressed = [k for k in ids if diffs[k] < -1e-9]
+    u_up = sum(1 for u in units if unit_sum[u] > 1e-9)
+    u_down = sum(1 for u in units if unit_sum[u] < -1e-9)
+    rng = random.Random(seed)
+    boots = []
+    for _ in range(n_boot):
+        pick = [units[rng.randrange(len(units))] for _ in units]
+        tot_n = sum(unit_n[u] for u in pick)
+        boots.append(sum(unit_sum[u] for u in pick) / tot_n if tot_n else 0.0)
+    sizes = sorted(unit_n.values(), reverse=True)
     return {
         "n": n,
-        "improved": improved,
-        "regressed": regressed,
-        "delta_mean": sum(diffs) / n,
-        "band": band,
-        "p": sign_test(improved, regressed),
-        "improved_ids": [k for k, d in zip(ids, diffs) if d > 1e-9],
-        "regressed_ids": [k for k, d in zip(ids, diffs) if d < -1e-9],
+        "units": len(units),
+        "improved": len(improved),
+        "regressed": len(regressed),
+        "units_improved": u_up,
+        "units_regressed": u_down,
+        "delta_mean": sum(diffs.values()) / n,
+        "band": 2 * math.sqrt(sum(v * v for v in unit_sum.values())) / n,
+        "band_items_independent": 2 * math.sqrt(sum(d * d for d in diffs.values())) / n,
+        "ci": (percentile(boots, 0.025), percentile(boots, 0.975)),
+        "p": sign_test(u_up, u_down),
+        "top5_unit_item_share": sum(sizes[:5]) / n,
+        "improved_ids": improved,
+        "regressed_ids": regressed,
     }
 
 
@@ -318,7 +342,7 @@ def estimate_cost(model, usage, prices=None):
 # ---------------------------------------------------------------- splits
 
 
-def make_splits(ids, dev_n, holdout_n, seed=0, groups=None, strata=None):
+def make_splits(ids, dev_n, holdout_n, seed=0, groups=None, strata=None, force_dev=()):
     """Random, stratified, group-aware split.
 
     Whole groups (near-duplicates, same source page, same parent product...) go to
@@ -344,6 +368,9 @@ def make_splits(ids, dev_n, holdout_n, seed=0, groups=None, strata=None):
         for st in sorted(by_stratum, key=str):
             if by_stratum[st]:
                 order.append(by_stratum[st].pop())
+    # units already read closely during the audit must not end up in holdout
+    forced = {groups[i] for i in force_dev if i in groups}
+    order = [g for g in order if g in forced] + [g for g in order if g not in forced]
     total = len(ids) or 1
     target = {"dev": dev_n, "holdout": holdout_n}
     out = {"dev": [], "holdout": [], "rest": []}
@@ -352,6 +379,8 @@ def make_splits(ids, dev_n, holdout_n, seed=0, groups=None, strata=None):
         members = g2ids[g]
         st = strata[members[0]]
         open_splits = [k for k in target if len(out[k]) < target[k]]
+        if g in forced:
+            open_splits = ["dev"]
         if not open_splits:
             out["rest"] += members
             continue

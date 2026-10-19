@@ -10,10 +10,12 @@ task should be solved. Data quality is a start condition, not a score.
    unavailable"). Stated limitations become `known=True` findings: they are reported, not
    blocking - unless the plan cannot work around them. A general acceptance ("pairs are
    unverified, use them anyway") does not cover specific defects you find later (three pairs
-   that are clearly different products): those are new findings. Side files the checks read
+   that are clearly different products): those are new findings - unless the brief already
+   prescribes how to handle that class ("record doubtful pairs separately"): then follow the
+   brief, record the defects with severity medium and quote the brief as the justification. Side files the checks read
    (provenance, mappings) go in `charter.data.aux` so they are hashed too.
 2. **Profile** every input the pipeline will read:
-   `profile_data.py <files/dirs> --out WS/audit/profile`. Note record counts, keys
+   `profile_data.py <files/dirs> --out WS/audit/profile` (`--out` is a file prefix). Note record counts, keys
    (`KEY?`), duplicated values in id/url/title-like fields, null rates, size distributions.
 3. **Write `audit/checks.py`** - computed checks, no eyeballing. Cover at least:
    - schema: required fields present, types, ids unique, references between records resolve;
@@ -37,6 +39,8 @@ task should be solved. Data quality is a start condition, not a score.
    `{"id", "verdict": "ok|hard|ambiguous|defect", "evidence", "severity"?, "known"?}`.
    The gate turns `defect` lines into a finding (default high) and `ambiguous` into medium.
    Distinguish genuine hard cases (keep them - they are often the point) from defects.
+   Close-read units are forced into dev when splits are made (the template's `--make-splits`
+   reads close_read.jsonl), because their content is already in your context.
 5. **Write `audit/data_audit.md`** (template below), then run `quality_gate.py WS`.
 
 ## Severity and the gate

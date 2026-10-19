@@ -62,13 +62,20 @@ loop learns to guess. Report coverage (share auto-decided) separately; it is not
    2 runs x (dev + holdout), and tell the user if it is large - strong-model runs share the
    subscription quota with this session and can stop everything for hours.
 2. Write a careful reference candidate (`candidates/ref-*`): full instructions, per-item
-   evidence, no cost cutting. Optionally two different prompt variants to decorrelate errors.
+   evidence, no cost cutting. Make the two runs differ - two prompt/representation variants,
+   or two strong models: the same prompt twice mostly measures the model's self-consistency
+   (in one test, 0 of 544 holdout items disagreed), and agreement between the runs is never
+   verification.
 3. Run it twice on dev and holdout (`--purpose reference`), then
    `reference.py merge WS RUN_A RUN_B --split dev` (needs `score.flatten`).
 4. Adjudicate every disagreement by reading the source data (or with a subagent for
    volume): a label, an `acceptable` set for genuinely ambiguous items, or `exclude` for data
    defects (report them). For holdout, delegate adjudication to a subagent and look only at
-   counts, so holdout content does not enter your context.
+   counts, so holdout content does not enter your context (no subagent tool: adjudicate with a
+   strong model through `llm_call.py` and read only the counts). Then run a consistency pass:
+   group adjudicated and agreed items by pattern (same kind of option, same unit mismatch) and
+   check that equal patterns carry equal labels - inconsistent references surface later as
+   unexplainable candidate failures and force an eval version change.
 5. `reference.py export-csv` gives a sheet (disagreements + random agreements) for a human
    check; `import-csv` records verdicts with source "human". Do it when the user can.
 6. Record tier, model, prompt, dates, disagreement rate and adjudication counts in
@@ -92,9 +99,18 @@ baseline runs for the noise floor, and a manual spot-check of the worst baseline
 (read ~5-10: is the grader right, is the reference right?). If more than ~1 in 10 baseline
 failures are grader/reference errors, fix the eval first.
 
-`min_delta` = max(paired noise band of two identical runs, one item). If the noise floor is
-not below the headroom, more rounds cannot show wins - enlarge dev, add repeats, or use a
-finer metric, and tell the user.
+`min_delta` = max(paired noise band of two identical runs, one item). The band is computed
+over units (all items of a unit together), because items inside a unit flip together: in one
+test a single 60-row product flipped between identical runs and moved the score by 0.08 while
+an item-independent band claimed 0.03. When a few units carry most items
+(`top5_unit_item_share` in the noise record), run candidates more than once, prefer more units
+over more items per unit, and report unit-bootstrap intervals (`paired_items` gives `ci`). If the
+noise floor is not below the headroom, more rounds cannot show wins - enlarge dev, add repeats,
+or use a finer metric, and tell the user.
+
+Holdout diagnostics: `analyze_run.py` on a holdout run prints aggregates only (failure tags,
+reference->prediction confusion, failures-per-unit histogram). Those are allowed; ids and texts
+are not. Repeated runs of one candidate on holdout count as one peek.
 
 ## Changing the eval mid-loop
 

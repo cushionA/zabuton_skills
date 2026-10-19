@@ -52,7 +52,11 @@ def main():
         old = ch.get("noise") or {}
         ch.setdefault("noise_history", []).append(old)
         ch["noise"] = dict(old, band=pi["band"], flip_items=pi["improved"] + pi["regressed"], n_items=pi["n"],
-                           min_delta=floor, renoised_from=[str(r) for r in a.renoise], renoised_at=now_iso())
+                           units=pi["units"], min_delta=floor, renoised_from=[str(r) for r in a.renoise],
+                           renoised_at=now_iso())
+        if old.get("min_delta") and floor < old["min_delta"] and pi["top5_unit_item_share"] > 0.3:
+            print("  caution: few large units carry most items; two runs can agree by chance - "
+                  "keep the larger min_delta unless more repeats confirm the lower one")
         write_json(ws / "charter.json", ch)
         print(f"noise re-measured on the incumbent: min_delta {old.get('min_delta')} -> {floor:.4f} "
               f"({ch['noise']['flip_items']} flips / {pi['n']} items)")
@@ -146,9 +150,13 @@ def main():
         n_items = pi["n"] or 1
         floor = max(pi["band"] or 0.0, 1.0 / n_items)
         headroom = (prim.get("ceiling", 1.0) - mean(prims)) if prims and None not in prims else None
-        noise = {"band": pi["band"], "flip_items": pi["improved"] + pi["regressed"], "n_items": pi["n"],
-                 "primary_runs": prims, "min_delta": floor, "headroom": headroom,
-                 "harness_error_rates": harness}
+        noise = {"band": pi["band"], "band_items_independent": pi["band_items_independent"],
+                 "flip_items": pi["improved"] + pi["regressed"], "n_items": pi["n"], "units": pi["units"],
+                 "top5_unit_item_share": pi["top5_unit_item_share"], "primary_runs": prims, "min_delta": floor,
+                 "headroom": headroom, "harness_error_rates": harness}
+        if pi["top5_unit_item_share"] > 0.3:
+            print(f"  note: 5 units carry {pi['top5_unit_item_share']:.0%} of the items - whole-unit flips dominate "
+                  "the noise; consider more repeats per candidate or a per-unit metric")
         add("noise", headroom is not None and floor < headroom, noise)
         add("harness_health", max(harness) <= 0.05, {"harness_error_rates": harness})
     else:

@@ -170,7 +170,7 @@ class FlowTest(unittest.TestCase):
         ex = self.run_py("export_deliverables.py", str(self.ws), "--candidate", "c002-llm")
         cfg = common.read_json(self.ws / "deliverables" / "production_config.json")
         self.assertEqual(cfg["settings"]["max_tokens"]["value"], 512)
-        self.assertTrue((self.ws / "deliverables" / "pipeline" / "pipeline.py").exists())
+        self.assertTrue((self.ws / "deliverables" / "candidates" / "c002-llm" / "pipeline.py").exists())
         self.assertIn("missing", ex.stdout)  # task_design.md / report.md not written yet
         # a defect found on close reading turns the gate into REVIEW, pauses the clock, blocks runs
         common.append_jsonl(self.ws / "audit" / "close_read.jsonl",

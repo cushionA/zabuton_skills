@@ -3,7 +3,8 @@
   python export_deliverables.py WS --candidate c007-x [--runs RUN_DIR ...] [--out WS/deliverables]
 
 Writes:
-  deliverables/pipeline/            final candidate (pipeline.py, prompts/, config.json)
+  deliverables/candidates/<name>/   final candidate (pipeline.py, prompts/, config.json)
+  deliverables/results/             outputs of the full-scope and holdout runs given with --runs
   deliverables/production_config.json   recommended settings, each with the measurement behind it
   deliverables/eval/ + charter.json  dataset.py, score.py, splits.json, reference/ - the same layout as a
                                     workspace, so run_experiment/validate_eval work on the deliverables folder
@@ -123,7 +124,15 @@ def main():
     runs = a.runs or [m["_dir"] for m in list_runs(ws) if m.get("candidate") == a.candidate and m.get("purpose") != "smoke"]
     if not runs:
         sys.exit("no measured runs of this candidate")
-    shutil.copytree(cand, out / "pipeline", dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(cand, out / "candidates" / a.candidate, dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    # the task's actual outputs: the user needs results, not only the method
+    for d in runs:
+        meta = read_json(Path(d) / "meta.json", {})
+        if meta.get("purpose") in ("full", "holdout") and (Path(d) / "outputs.jsonl").exists():
+            (out / "results").mkdir(exist_ok=True)
+            shutil.copy2(Path(d) / "outputs.jsonl", out / "results" / f"{meta['run_id']}.outputs.jsonl")
+            shutil.copy2(Path(d) / "summary.json", out / "results" / f"{meta['run_id']}.summary.json")
     for name in ("dataset.py", "score.py", "splits.json", "eval_spec.md", "validation.json"):
         src = ws / "eval" / name
         if src.exists():
@@ -145,7 +154,9 @@ def main():
             copied.append(name)
     manifest = ["# Deliverables", "", f"generated {rec['generated']} from candidate `{a.candidate}`", "",
                 "| path | content |", "|---|---|",
-                "| pipeline/ | final pipeline code, prompts and config |",
+                f"| candidates/{a.candidate}/ | final pipeline code, prompts and config (workspace layout: "
+                "run_experiment.py works on this folder) |",
+                "| results/ | outputs and summaries of the full-scope / holdout runs passed to export |",
                 "| production_config.json | recommended settings with the measurements behind them |",
                 "| eval/, charter.json | dataset, splits, scorer, reference (provenance in eval/eval_spec.md) - "
                 "re-measure later with run_experiment.py on this folder after relocate_workspace.py |",

@@ -2,6 +2,7 @@
 
   python init_workspace.py WS --task "short name" --data PATH [PATH...] [--brief PATH]
       [--model haiku] [--backend cli|api] [--effort low]
+  python init_workspace.py WS --migrate     # after a skill update: add new charter fields
 """
 import argparse
 import os
@@ -27,17 +28,42 @@ Concise English. One block per experiment; rewrite Learnings as they change.
 """
 
 
+def _merge_missing(dst, src, path=""):
+    added = []
+    for k, v in src.items():
+        if k not in dst:
+            dst[k] = v
+            added.append(path + k)
+        elif isinstance(v, dict) and isinstance(dst[k], dict):
+            added += _merge_missing(dst[k], v, path + k + ".")
+    return added
+
+
+def migrate(ws):
+    """Add charter fields introduced by newer skill versions; never overwrite existing values."""
+    ch = read_json(Path(ws) / "charter.json")
+    tpl = read_json(TEMPLATE / "charter.json")
+    added = _merge_missing(ch, tpl)
+    ch["skill_dir"] = str(TEMPLATE.parents[1])
+    write_json(Path(ws) / "charter.json", ch)
+    print("charter: added " + (", ".join(added) if added else "nothing") + " (existing values kept)")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("ws")
-    ap.add_argument("--task", required=True)
-    ap.add_argument("--data", nargs="+", required=True, help="input files the pipeline will read")
+    ap.add_argument("--migrate", action="store_true", help="add fields from a newer template to an existing workspace")
+    ap.add_argument("--task", required="--migrate" not in sys.argv)
+    ap.add_argument("--data", nargs="+", required="--migrate" not in sys.argv, help="input files the pipeline will read")
     ap.add_argument("--brief", default="", help="path to the user's task brief, if any")
     ap.add_argument("--model", default="haiku")
     ap.add_argument("--backend", default="cli", choices=["cli", "api"])
     ap.add_argument("--effort", default="low")
     a = ap.parse_args()
     ws = Path(a.ws)
+    if a.migrate:
+        migrate(ws)
+        return
     ws.mkdir(parents=True, exist_ok=True)
     for src in TEMPLATE.rglob("*"):
         if "__pycache__" in src.parts:

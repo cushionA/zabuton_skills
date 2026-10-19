@@ -45,7 +45,17 @@ def overview(R, top):
     for g in sc.get("gate_failures", [])[:3]:
         print(f"  gate: {str(g)[:160]}")
     if holdout:
-        print("  (holdout run: failure details withheld to keep it held out)")
+        # aggregates only: no ids, no texts - enough to see *what kind* of failure, not *which item*
+        items = sc.get("items", [])
+        fails = [i for i in items if i.get("score", 0) < 1]
+        tags = Counter(t for i in fails for t in (i.get("tags") or ["untagged"]))
+        print(f"FAILURES {len(fails)}/{len(items)} items (holdout: aggregates only); tags: "
+              + ", ".join(f"{t}:{c}" for t, c in tags.most_common(top)))
+        conf = Counter((str(i.get("ref"))[:24], str(i.get("pred"))[:24]) for i in fails)
+        print("  ref->pred: " + ", ".join(f"{r}->{p}:{c}" for (r, p), c in conf.most_common(top)))
+        per_unit = Counter(i.get("unit") for i in fails)
+        hist = Counter("1-2" if c <= 2 else "3-5" if c <= 5 else "6-20" if c <= 20 else "21+" for c in per_unit.values())
+        print(f"  failing units: {len(per_unit)}; failures per unit: {dict(hist)}")
     else:
         items = sc.get("items", [])
         fails = [i for i in items if i.get("score", 0) < 1]

@@ -110,6 +110,22 @@ class CommonTest(unittest.TestCase):
         self.assertEqual((pi["improved"], pi["regressed"]), (1, 0))
         self.assertAlmostEqual(common.cohen_kappa([("x", "x"), ("y", "y")]), 1.0)
 
+    def test_paired_band_counts_whole_unit_flips(self):
+        # one 60-item unit flips entirely between two identical runs; 40 small units are stable
+        a = [{"id": f"big{i}", "unit": "big", "score": 1.0} for i in range(60)]
+        a += [{"id": f"s{i}", "unit": f"s{i}", "score": 1.0} for i in range(40)]
+        b = [dict(x, score=0.0) if x["unit"] == "big" else x for x in a]
+        pi = common.paired_items(a, b)
+        self.assertAlmostEqual(pi["band"], 2 * 60 / 100)                  # clustered: 1.2
+        self.assertAlmostEqual(pi["band_items_independent"], 2 * 60 ** 0.5 / 100)  # naive: ~0.15
+        self.assertEqual((pi["units"], pi["units_regressed"]), (41, 1))
+
+    def test_make_splits_forces_close_read_units_into_dev(self):
+        ids = [f"u{i}" for i in range(30)]
+        sp = common.make_splits(ids, 10, 10, seed=5, force_dev=["u7", "u21"])
+        self.assertIn("u7", sp["dev"])
+        self.assertIn("u21", sp["dev"])
+
     def test_estimate_cost_haiku_long_context(self):
         short = common.estimate_cost("haiku", {"input": 50_000, "output": 0})
         self.assertAlmostEqual(short, 0.005)

@@ -31,7 +31,8 @@ from quality_gate import gate_allows_runs  # noqa: E402
 from workspace import candidate_hash, charter as load_charter, eval_hash, ledger_rows, list_runs, load_eval, load_module  # noqa: E402
 
 NEEDS_VALIDATION = {"experiment", "holdout", "full", "confirm"}
-PURPOSES = {"smoke", "baseline", "reference"} | NEEDS_VALIDATION
+# probe: diagnostics such as a headroom check on a stronger model; never a candidate for decisions
+PURPOSES = {"smoke", "baseline", "reference", "probe"} | NEEDS_VALIDATION
 
 
 class RunLog:
@@ -264,10 +265,12 @@ def run(ws, candidate, split, purpose, exp=None, limit=None, concurrency=None, t
         prior = list_runs(ws)
         # zero-call (code-only) candidates do not count: knowing what code alone achieves on
         # holdout is worth one peek and cannot overfit a prompt
-        n_hold = sum(1 for r in prior if r.get("purpose") == "holdout" and not r["_summary"].get("ai_free"))
+        # a peek = one candidate looked at on holdout; repeat runs of that candidate are the same peek
+        peeked = {r.get("candidate") for r in prior if r.get("purpose") == "holdout" and not r["_summary"].get("ai_free")}
+        n_hold = len(peeked)
         code_only = any(r.get("candidate") == candidate and r["_summary"].get("ai_free") for r in prior)
         cap = ch.get("loop", {}).get("max_holdout_evals", 3)
-        if n_hold >= cap and not code_only:
+        if n_hold >= cap and not code_only and candidate not in peeked:
             sys.exit(f"REFUSED: holdout already evaluated {n_hold} times (cap {cap}); more peeks turn it into a dev set")
 
     config = dict(ch.get("backend", {}))
@@ -366,9 +369,12 @@ def rescore(ws, run_dir):
     rows = read_jsonl(run_dir / "outputs.jsonl")
     outputs = {r["id"]: (r["output"] if r["status"] == "ok" else None) for r in rows}
     sc = score_run(ws, run_dir, units, outputs, meta["split"])
-    summary = read_json(run_dir / "summary.json", {})
-    summary.update(primary=sc.get("primary"), metrics=sc.get("metrics", {}),
-                   gate_failures=len(sc.get("gate_failures", [])), items=len(sc.get("items", [])))
+    old = read_json(run_dir / "summary.json", {})
+    # recompute every summary field so runs measured before a field existed stay comparable
+    summary = _summarize(units, rows, read_jsonl(run_dir / "calls.jsonl"), sc, old.get("run_wall_s") or 0.0,
+                         old.get("concurrency") or meta.get("config", {}).get("concurrency"))
+    summary["pipeline_counts"] = old.get("pipeline_counts", {})
+    summary["quota_exhausted"] = old.get("quota_exhausted", False)
     write_json(run_dir / "summary.json", summary)
     meta["eval_hash"] = sc["eval_hash"]
     meta["rescored"] = now_iso()

@@ -42,6 +42,9 @@ def _get(d, dotted):
         if not isinstance(cur, dict):
             return None
         cur = cur.get(part)
+    if cur is None and dotted.endswith("_per_unit") and isinstance(d, dict) and d.get("units"):
+        total = d.get(dotted[: -len("_per_unit")])  # runs measured before the metric existed
+        cur = total / d["units"] if isinstance(total, (int, float)) else None
     return cur
 
 
@@ -115,6 +118,18 @@ def _pool(runs, eff_metric):
         "items": items, "n_runs": len(runs), "runs": [r["run_id"] for r in runs],
         "ai_free": all(r["summary"].get("ai_free") for r in runs),
     }
+
+
+def current_value(ws, decision, split="dev", eff_metric=None):
+    """Re-pool a decided experiment's runs under the current eval (decide rows keep decision-time
+    numbers; after a rescore those are stale). Returns (primary, eff, stale)."""
+    if not decision:
+        return None, None, True
+    runs = _exp_runs(ws, decision["exp"], decision.get("split", split))
+    if not runs or any(r["stale"] for r in runs):
+        return decision.get("primary"), decision.get("eff"), True
+    p = _pool(runs, eff_metric or decision.get("eff_metric") or "cost_usd_per_unit")
+    return p["primary"], p["eff"], False
 
 
 def _guard_violations(guards, cand, best):
@@ -208,7 +223,9 @@ def decide(ws, exp, split="dev", override=None, reason=None):
         pi = paired_items(best_pool["items"], cand["items"])
         delta = direction * (cand["primary"] - best_pool["primary"])
         eff_ratio = (cand["eff"] / best_pool["eff"]) if (cand["eff"] and best_pool["eff"]) else None
-        out.update(delta=delta, min_delta=min_delta, paired={k: pi[k] for k in ("n", "improved", "regressed", "band", "p")},
+        out.update(delta=delta, min_delta=min_delta,
+                   paired={k: pi[k] for k in ("n", "units", "improved", "regressed", "units_improved",
+                                              "units_regressed", "band", "ci", "p")},
                    eff_ratio=eff_ratio, best_exp=best["exp"])
         guards = _guard_violations(ch.get("guards"), cand, best_pool)
         harness_cap = max(0.05, 2 * best_pool["harness"])
@@ -245,6 +262,9 @@ def decide(ws, exp, split="dev", override=None, reason=None):
                 decision, why = "keep", f"quality tie, {eff_metric} x{eff_ratio:.2f} (simpler/cheaper wins ties)"
             else:
                 decision, why = "discard", f"primary {delta:+.4f} vs min_delta {min_delta:.4f}; items +{pi['improved']}/-{pi['regressed']}"
+    if out.get("paired") and out["paired"].get("ci") and out["paired"]["ci"][0] is not None:
+        lo, hi = out["paired"]["ci"]
+        why += f"; unit-bootstrap 95% CI [{direction * lo:+.4f}, {direction * hi:+.4f}]"
     if override:
         why = f"OVERRIDE {decision}->{override}: {reason or 'no reason given'} | {why}"
         decision = override
@@ -393,9 +413,11 @@ def print_status(ws, compact=False, write=False):
     for d in st["decisions"].values():
         counts[d["decision"]] = counts.get(d["decision"], 0) + 1
     lines.append(f"PHASE {r['phase']} | experiments {len(st['props'])} {counts}")
+    eff_metric = ch.get("efficiency_metric", "cost_usd_per_unit")
     if best:
-        lines.append(f"BEST {best['exp']} {best['candidate']} primary={best['primary']:.4f} "
-                     f"{best.get('eff_metric')}={best.get('eff')} lever={best.get('lever')}")
+        cur_p, cur_e, stale = current_value(ws, best, eff_metric=eff_metric)
+        lines.append(f"BEST {best['exp']} {best['candidate']} primary={cur_p:.4f} {eff_metric}={cur_e} "
+                     f"lever={best.get('lever')}" + ("  (decision-time numbers: rescore its runs)" if stale else ""))
     noise = ch.get("noise") or {}
     if noise:
         lines.append(f"NOISE min_delta={noise.get('min_delta'):.4f} band={noise.get('band')} n_items={noise.get('n_items')} "
@@ -406,10 +428,11 @@ def print_status(ws, compact=False, write=False):
         if switch and best:
             at_switch = [d for d in st["decisions"].values() if d.get("decision") in KEEPS and d["at"] <= switch[-1]["at"]]
             if at_switch:
-                top = at_switch[-1]["primary"]
-                drop = top - best["primary"]
+                top = current_value(ws, at_switch[-1], eff_metric=eff_metric)[0]
+                now = current_value(ws, best, eff_metric=eff_metric)[0]
+                drop = top - now
                 md = (ch.get("noise") or {}).get("min_delta") or 0.0
-                lines.append(f"DRIFT since phase switch: {top:.4f} -> {best['primary']:.4f} ({-drop:+.4f})"
+                lines.append(f"DRIFT since phase switch: {top:.4f} -> {now:.4f} ({-drop:+.4f})"
                              + ("  <- cumulative drop exceeds min_delta: check holdout before cutting further"
                                 if drop > md else ""))
     lines.append(f"STALL {r['stall']} non-keeps since last keep; groups since: {r['groups_since']}")
@@ -550,7 +573,10 @@ def main():
         floor = a.floor
         if floor is None and a.to == "efficiency" and st["best"]:
             md = (ch.get("loop", {}).get("min_delta") or (ch.get("noise") or {}).get("min_delta") or 0.0)
-            floor = st["best"]["primary"] - md
+            cur, _, stale = current_value(ws, st["best"], eff_metric=ch.get("efficiency_metric"))
+            if stale:
+                sys.exit("the best experiment's runs are stale (eval changed): rescore them before setting a floor")
+            floor = cur - md
         append_jsonl(ws / "ledger.jsonl", {"event": "phase", "from": ch.get("phase", "quality"), "to": a.to,
                                            "floor": floor, "reason": a.reason, "at": now_iso()})
         ch["phase"] = a.to
