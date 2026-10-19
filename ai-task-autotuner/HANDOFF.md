@@ -51,7 +51,7 @@ ai-task-autotuner/
   HANDOFF.md                このファイル
 ```
 
-テスト: `python -B -m unittest discover -s ai-task-autotuner/tests`（2026-10-19 時点で 15件成功）。
+テスト: `python -B -m unittest discover -s ai-task-autotuner/tests`（2026-10-19 時点で 17件成功）。
 
 ## 4. 実データでの試験（iteration-1）
 
@@ -59,7 +59,7 @@ ai-task-autotuner/
 
 | 試験 | 状態 | 結果 |
 |---|---|---|
-| ①SKU突合・スキルあり | 途中（利用上限で2回中断。最後の状態は FRESH_EYES 推奨） | 実験6件まで。下記参照 |
+| ①SKU突合・スキルあり | **完了**（利用上限で3回中断し、そのつど再開） | 下記参照 |
 | ①SKU突合・スキルなし（比較用） | 途中（参照作成と実行器の作成まで） | 未評価 |
 | ②au→楽天 同一商品特定・スキルあり | **完了** | 下記参照 |
 | ②同・スキルなし（比較用） | 途中（監査報告の後、実行器の作成中に中断） | 未評価 |
@@ -83,27 +83,26 @@ ai-task-autotuner/
 - **費用と時間:** 費用 $1.60（予算 $3）、作業時間 約0.8時間（上限2時間。中断時間は除く）。
 - **本番設定（実測から算出）:** max_tokens 2048、timeout 30秒、同時実行 6、effort low、thinking off。
 
-### ① SKU突合・スキルあり（途中）
+### ① SKU突合・スキルあり（完了）
 
 - **dev / holdout:** dev は normal_50 の50ペア（楽天 SKU 642項目）、holdout は41ペア（544項目）。
-- **参照データ:** Opus（effort high）を2回独立に実行して作った。dev の不一致 8.9% は精読で裁定し、holdout の不一致は 0%。
-  - 同じプロンプトでの2回実行は、独立した証拠になりにくいことが分かった。
-  - 人の確認はまだしていない。
-- **採点の修正（EVAL v2）:** 途中で参照データの誤りを1件見つけ、評価の版を上げた。全実行を採点し直している（評価を変えるときの手順どおり）。
-- **実験の結果（Opus 参照との一致率）:**
-
-  | 実験 | 内容 | 一致率 | 判定 |
-  |---|---|---|---|
-  | E001 | ベースライン | 0.857 | 基準 |
-  | E002 | コードだけ | 0.597 | 却下（AIは必要） |
-  | E003 | 仕様の定義をプロンプトに追加 | **0.887** | 採用 |
-  | E004 | 追加品ルールを狭める | 0.806 | 却下 |
-  | E005 | effort medium | 0.877 | 却下 |
-  | E006 | ルールによる後処理 | 0.891 | 却下 |
-
-- **上限の目安:** Sonnet で同じプロンプトを試した結果は 0.854。プロンプトか参照データ側が上限を決めている可能性がある。
-- **残り:** FRESH_EYES（失敗の分類、経緯を見せないサブエージェントによる提案）→ 追加実験 → 効率フェーズ → holdout → 成果物。
-- **費用:** `claude -p` の定価換算で $14.1。うち Opus 参照が $10.8、Sonnet での上限確認が $2.1。
+- **参照データ:** Opus（effort high）を2回独立に実行して作り、不一致は裁定した。人の確認はしていない。
+- **採点の版上げ:** 途中で参照データの誤りが見つかり、評価を v2、v3 と更新して全実行を採点し直した（評価を変えるときの手順どおり）。
+- **実験:** 13件。品質フェーズの後、効率フェーズに移った。
+- **最終構成:** 次の2段の組み合わせ。
+  - コードで「完全一致ペア」を確定する（152ペア中78ペア・561枠。参照のある範囲では全件一致）。
+  - 残りのペアだけ Haiku を1回呼ぶ。出力は簡潔な形式、入力は圧縮したテキストにする。
+- **結果（Opus 参照との一致率。正答率ではない）:**
+  - holdout: 初期構成 0.818 → 最終 **0.925**。差 +0.107、ペア単位の95%区間 +0.02〜+0.24。
+  - 参照が否定する au 行への誤った紐付けは0件。
+- **全152ペア:** matched 1,325 / unmatched 263 / conditional 163 / review 183 / 失敗 0。自動確定 82.1%。
+- **処理時間:** 同時実行6で壁時計153秒、AI 呼び出し74回、AI を使ったペアの中央値8.9秒。
+- **費用:** 約 $0.001 / ペア（非キャッシュ換算の定価）。
+- **上限の確認:** Sonnet で同じプロンプトを試すと 0.854（Haiku は 0.896）。残りの誤りはモデルの能力ではなく、方針や参照の曖昧さによると分かった。
+- **コードだけの場合:** 0.597 で、AI は必要と判断した。
+- **本番設定:** max_tokens 23,040、timeout 110秒、同時実行6、effort low。
+- **限界:** 少数の大きな商品ペアが揺れを左右している。同じ構成でも dev の一致率が実行ごとに0.08〜0.19変わった。
+- **費用の合計（`claude -p` の定価換算）:** 約 $15.7。うち Opus 参照が $10.8。
 
 ## 5. 試験から分かったこと（スキルに反映済み）
 
@@ -115,6 +114,12 @@ ai-task-autotuner/
 - **キャッシュ:** `claude -p` はプロンプト全体をキャッシュする。同じ内容を再実行すると約1/6の費用になる。
   - 費用の比較は、キャッシュなし換算（`cost_uncached_list_usd_per_unit`）を既定にした。
 - **データ分割の不具合:** 件数の少ない区分が開発用に偏っていた。修正済み。
+- **揺らぎの見積もり（①の指摘から修正済み）:** SKU 1件ずつを独立とみなす計算では揺らぎを過小に見積もっていた。大きな商品ペアは、丸ごと結果が入れ替わる。
+  - 揺らぎの幅と区間を、商品ペアなどのまとまり単位（ブートストラップ）で計算するようにした。
+  - 評価を変えた後は、台帳の「最良」と下限を最新の評価で計算し直す。
+  - 精読した商品は開発用データに回す。
+  - 最終評価用データでは、集計だけを表示する。
+  - 古い作業フォルダを新しい版に合わせる `init_workspace.py --migrate` を追加した。
 - **その他（②の指摘から修正済み）:**
   - 上限で壊れた実行は判定から除外する。
   - 監査をやり直しても、承認を引き継ぐ。
@@ -141,17 +146,17 @@ ai-task-autotuner/
 
 2. データ zip（`ai-task-autotuner-testdata-20261019.zip`）を展開する。`inputs/` の中に、元のデータ zip と案内文がある。元のデータ zip も展開する（例: `D:\work\sku-normal-v1`）。
 3. **新しく試す場合:** `evals/evals.json` の依頼文の `DATA_DIR` / `BRIEF_PATH` を置き換え、Claude Code にそのまま依頼する。
-4. **①SKU突合の続きから再開する場合:** `iteration-1/eval-1-sku-matching-no-labels/with_skill/outputs/ws` を作業フォルダとして使う。
+4. **試験の作業フォルダを手元で動かす場合（追加実験など）:** 例として `iteration-1/eval-1-sku-matching-no-labels/with_skill/outputs/ws` を使う。手順は次のとおり（その後 `init_workspace.py <ws> --migrate` も実行する）。
 
    ```powershell
    python ai-task-autotuner/scripts/relocate_workspace.py <ws> --data-map /tmp/claude-0/-home-user-zabuton-skills/63e4c5c7-d309-596e-8dd4-3c5a2c09efb2/scratchpad/inputs/sku-normal-v1=D:/work/sku-normal-v1
    python ai-task-autotuner/scripts/quality_gate.py <ws> --verify      # "data unchanged" を確認
    python ai-task-autotuner/scripts/ledger.py clock <ws> resume --gap  # 中断時間を除外
-   python ai-task-autotuner/scripts/ledger.py status <ws> --write      # RECOMMEND に従う（FRESH_EYES から）
+   python ai-task-autotuner/scripts/ledger.py status <ws> --write      # RECOMMEND に従う
    ```
 
    Claude Code には「`<ws>` の STATE.md と journal.md の末尾を読み、ai-task-autotuner スキルで続きから進めて」と依頼する。runs/ の中の記録にもこの環境のパスが残るが、判定には影響しない。
-5. ②の成果物は `.../eval-2-.../with_skill/outputs/ws/deliverables/` にある。`final_message.md` が報告、`skill_feedback.md` がスキルへの指摘。
+5. 各試験の成果物は `.../with_skill/outputs/ws/deliverables/` にある。`final_message.md` が報告、`skill_feedback.md` がスキルへの指摘。
 
 ## 8. データ
 
@@ -164,8 +169,11 @@ ai-task-autotuner/
 
 ## 9. 次にやること（優先順）
 
-1. ①SKU突合を最後まで回す（ローカル推奨）。FRESH_EYES の効果、効率フェーズ、成果物、報告の5項目が揃うかを確認する。
-2. 比較用（スキルなし）を同じ条件で回し、skill-creator の評価ビューア（`generate_review.py`）でスキルあり・なしを比べる。採点項目は `iteration-1/*/eval_metadata.json` に下書きがある。
+1. 比較用（スキルなし）を同じ条件で回し、スキルあり・なしを skill-creator の評価ビューア（`generate_review.py`）で比べる。
+   - 採点項目は `iteration-1/*/eval_metadata.json` に下書きがある。
+   - 今回は利用枠の都合で、比較用は2件とも途中まで。
+2. 修正後の版で、①または②をもう一度回す。今回の修正（まとまり単位の揺らぎ、最新評価での最良値の再計算など）が意図どおり働くかを確認する。
 3. api 系を実際の API キーで1件検証し、thinking off の効果（思考トークンの削減と品質）を測る。
-4. 参照データ（Opus 作成）を人が部分確認する（`reference.py export-csv`）。
-5. description の起動精度の最適化（skill-creator の run_loop）。
+4. Opus で作った参照を人が部分確認する（`reference.py export-csv`）。①で揺れの大きい4ペア（168枠）が優先。
+5. 突合タスク向けの採点テンプレートを用意する（判定と行IDの組、許容集合、誤紐付けや過剰主張のタグ）。①の `ws/eval/score.py` が雛形になる。
+6. description の起動精度を最適化する（skill-creator の run_loop）。

@@ -54,7 +54,10 @@ Compared with the current best on the same split and eval version, items paired 
 - Efficiency phase: `keep` when primary stays >= the floor and the efficiency metric improves
   by >= `min_efficiency_gain` (10%), or primary improves at equal cost.
 - `rerun`: a marginal keep (delta < 2x min_delta, or near the floor) from one run - repeat it
-  (`--tag r2`) and decide again on the pooled runs.
+  (`--tag r2`) and decide again on the pooled runs. The decision line also prints a
+  unit-bootstrap 95% interval; when it straddles zero, more repeats beat more rounds.
+- Decisions keep the numbers of their time. After an eval change and `--rescore`, `status`
+  re-pools the best from rescored runs and flags anything still stale.
 - `--override keep|discard --reason` exists for evidence the rules cannot see; use rarely and
   say why. Discarded and kept candidates both stay on disk.
 
@@ -108,8 +111,9 @@ diversity mechanically; your job is to take its advice seriously.
   2. Headroom probe - one dev run that tells you where the ceiling is, e.g. the same prompt
      on a stronger model (if it also fails, the spec or reference is the problem, not model
      capacity); or feed one stage oracle input (true candidates, true attributes) to measure
-     the ceiling of the next stage; or an ablation removing a component. Record it with
-     `ledger.py mark WS headroom "<result>"`. Probes are diagnostics, not candidates to keep.
+     the ceiling of the next stage; or an ablation removing a component. Run it with
+     `--purpose probe` and record it with `ledger.py mark WS headroom "<result>"`. Probes are
+     diagnostics, never candidates.
   3. Fresh subagent, deliberately without the ledger or journal (no anchoring). Give it
      `audit/data_audit.md`, `eval/eval_spec.md`, the best candidate's files and the failure
      dump, and ask:

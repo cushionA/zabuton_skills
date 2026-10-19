@@ -63,6 +63,9 @@ python SKILL_DIR/scripts/init_workspace.py WS --task "<name>" --data <input file
 python SKILL_DIR/scripts/llm_call.py --calibrate          # sends no task data; fine before the audit
 ```
 
+After a skill update, `init_workspace.py WS --migrate` adds new charter fields to an existing
+workspace without touching your values.
+
 Fill `WS/charter.json` from the user's request; ask only for what blocks you (usually nothing):
 goal, data scope (`data.inputs` the pipeline reads, `data.aux` side files the audit reads),
 target model/backend (default `haiku` via `claude -p`; follow an explicit choice), primary
@@ -142,7 +145,8 @@ At the end the user gets, under `WS/deliverables/` (`export_deliverables.py WS -
 `task_design.md` (the final task: steps, what code does, what the model does, prompts, I/O
 schema, how to operate it), `production_config.json` (max_tokens, timeout, concurrency, effort,
 thinking, caching, expected cost and latency per unit - each with the measurement behind it),
-the pipeline code and prompts, `eval/` + `charter.json` + `data_built/` (splits, reference with
+the pipeline code and prompts (`candidates/<best>/`), the full-scope outputs (`results/`),
+`eval/` + `charter.json` + `data_built/` (splits, reference with
 provenance, constructed task data - the workspace layout, so the measurement can be re-run on
 the deliverables folder after `relocate_workspace.py`), `report.md`, and `non_ai_findings.md`
 when code alone did well. Write `task_design.md` and `report.md` yourself (report.md lists their
