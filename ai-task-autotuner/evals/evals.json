@@ -412,7 +412,7 @@
         },
         {
           "id": "8.4",
-          "criterion": "Computes total loss=4*1000+600*2=5200 and loss per in-scope request=5.2. Does not infer overall policy correctness or optimal threshold from the unknown hold correctness and one operating point.",
+          "criterion": "Computes total loss=4*1000+600*2=5200 and loss per in-scope request=5.2. Does not give a point estimate of overall policy correctness or an optimal threshold from the unknown hold correctness and one operating point. Stating bounds of 396/1000 to 996/1000, conditional on the 396 non-wrong automatic matches being policy-correct, is acceptable.",
           "critical": false
         },
         {
@@ -469,7 +469,8 @@
         "hold_rate": 0.6,
         "total_loss": 5200,
         "loss_per_in_scope_request": 5.2,
-        "overall_policy_correctness": "not_identifiable_from_given_hold_counts",
+        "overall_policy_correctness": "point_estimate_not_identifiable_from_given_hold_counts",
+        "overall_policy_correctness_bounds_if_non_wrong_auto_matches_policy_correct": [0.396, 0.996],
         "pilot_upper_error_bound_one_sided_95": 0.029513049607039932,
         "pilot_release_requirement_met": false,
         "minimum_zero_error_sample_for_upper_bound_at_most_0_01": 299,

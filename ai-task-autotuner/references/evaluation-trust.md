@@ -84,7 +84,7 @@ For `N` in-scope items, `A` automatic decisions and `W` wrong automatic decision
 - Selective error = `W / A`; report N/A if `A = 0`, never a reassuring zero.
 - Wrong automatic decisions per input = `W / N`.
 
-For example, `N=1000, A=400, W=4` gives 40% coverage, 1% selective error and 0.4% error
+For example, `N=2000, A=500, W=10` gives 25% coverage, 2% selective error and 0.5% error
 per input. These answer different questions. If automatic decisions include both matches
 and no-matches, separate wrong accepts and wrong rejections. Define false-accept numerators
 and denominators explicitly; neither `FP / N` nor `FP / (TP + FP)` equals `FP / (FP + TN)`.
@@ -115,9 +115,9 @@ exact one-sided 95% upper error bound is `1 - 0.05 ** (1/n)`. Thus:
 
 | Observation | Upper error bound / implication |
 |---|---|
-| 0 errors in 100 | About 2.95%; does not certify an error rate below 1% |
-| 0 errors in 299 | About 0.997%, under the sampling assumptions |
-| 0 errors in 2995 | About 0.100%, under the sampling assumptions |
+| 0 errors in 50 | About 5.8%; does not certify an error rate below 2% |
+| 0 errors in 149 | About 1.99%, under the sampling assumptions |
+| 0 errors in 1497 | About 0.200%, under the sampling assumptions |
 
 For a target bound `p0`, zero-error planning needs
 `n >= ceil(log(0.05) / log(1 - p0))`. This is not a promise of zero observed errors, a bound

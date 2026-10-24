@@ -1,7 +1,7 @@
 """Prove the evaluation can be trusted before the improvement loop starts.
 
   python validate_eval.py WS --runs WS/runs/<baseline_r1> WS/runs/<baseline_r2> \
-      --spotcheck "read 8 lowest-scoring baseline items; grader correct on all; 1 ref fixed (key ...)"
+      --spotcheck "read 5 failing + 5 passing baseline items against sources; grader correct on all; 1 ref fixed (key ...)"
 
 Checks (all must pass; results go to WS/eval/validation.json, pinned to the eval hash):
   splits     dev/holdout non-empty, disjoint, and no shared group (dataset.group_of) across them
@@ -15,7 +15,8 @@ Checks (all must pass; results go to WS/eval/validation.json, pinned to the eval
   rescore    stored baseline scores reproduce from stored outputs
   identity   baseline outputs were generated from the current source data and scored with the current eval
   noise      two baseline runs give the noise band; must be smaller than the headroom
-  spotcheck  a human-style read of the worst baseline items was done (--spotcheck note)
+  spotcheck  a source-based read of baseline failures and successes was recorded (--spotcheck note;
+             only its presence is checked)
 Optional score.trivial(units, split) reports a trivial baseline (e.g. majority class).
 """
 import argparse
