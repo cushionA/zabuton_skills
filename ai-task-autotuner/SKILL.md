@@ -1,24 +1,19 @@
 ---
 name: ai-task-autotuner
 description: >-
-  Turn test data plus a task goal into a measured LLM/AI-API pipeline, then improve it
-  autonomously from real runs: audit the data first (stop and report if it is unfit),
-  design the task, have an independent reviewer check it before freezing evaluation,
-  run a baseline, then keep or discard one
-  pre-registered change at a time against the noise floor - accuracy first, then cost,
-  latency and task structure - until the user's targets or limits are met or improvement
-  plateaus. Deterministic code (normalization, rules, candidate pruning) may do any part of
-  the work, and finding that the model is unnecessary is a welcome result. Delivers the task
-  design, the built test set and eval kit, recommended production settings (max tokens,
-  timeout, concurrency, effort) and an honest report. Model calls use the host's CLI as an
-  API stand-in: Codex defaults to Luna (`gpt-6-luna`), Claude to Haiku; the Anthropic API is
-  also supported. Use whenever
-  someone hands over a dataset and wants an AI task (classification, extraction,
-  matching/reconciliation, retrieval, ranking, judging, summarizing) built and tuned by
-  measurement: "design and optimize an AI task for this data", "how far can haiku get",
-  "tune the prompt with real runs", "autoresearch-style keep/discard loop", "make it
-  accurate, then cheaper", "AIタスクを設計して実測で改善し続けて", even if no skill is named.
-  Not for one-off prompt advice, model training/fine-tuning, or evaluating code changes.
+  Turn test data plus a task goal into a measured LLM/AI-API pipeline and improve it
+  autonomously from real runs: audit the data (stop if unfit), design the task, get an
+  independent review, freeze evaluation, run a baseline, then keep or discard one
+  pre-registered change at a time against noise - accuracy first, then cost, latency and
+  structure - until targets, limits or a plateau. Code may do any part, even replace the
+  model. Delivers the task design, eval kit, production settings and an honest report.
+  Calls use the host CLI as an API stand-in (Codex: Luna `gpt-6-luna`, Claude: Haiku) or
+  the Anthropic API. Use when someone hands over a dataset and wants an AI task
+  (classification, extraction, matching, retrieval, ranking, judging, summarizing) built
+  and tuned by measurement: "design and optimize an AI task for this data", "tune the
+  prompt with real runs", "make it accurate, then cheaper", "AIタスクを設計して実測で改善し続けて",
+  even if no skill is named. Not for one-off prompt advice, fine-tuning or evaluating code
+  changes.
 ---
 
 # AI Task Autotuner
