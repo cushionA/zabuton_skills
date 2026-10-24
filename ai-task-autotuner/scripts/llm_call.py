@@ -30,6 +30,7 @@ from common import MODEL_ALIASES, estimate_cost, extract_json, sha256_text  # no
 from codex_backend import attempt as _codex_attempt  # noqa: E402
 
 DEFAULT_SYSTEM = "Follow the user's instructions exactly."
+DEFAULT_EFFORT = "low"
 BACKENDS = ("auto", "codex", "claude", "cli", "api")
 DEFAULT_MODELS = {"codex": "gpt-6-luna", "claude": "haiku", "api": "haiku"}
 RETRYABLE_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
@@ -91,6 +92,12 @@ def _child_env():
     env = dict(os.environ)
     env.pop("CLAUDECODE", None)
     env.pop("CLAUDE_CODE_ENTRYPOINT", None)
+    # Effort comes from the candidate, not the parent shell. The effort env var
+    # overrides --effort; fixed-budget switches also change the thinking policy
+    # outside the recorded candidate configuration. Preserve auth and proxy vars.
+    for key in ("CLAUDE_CODE_EFFORT_LEVEL", "MAX_THINKING_TOKENS",
+                "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING"):
+        env.pop(key, None)
     return env
 
 
@@ -245,13 +252,15 @@ def call(prompt, system=None, *, backend="auto", model=None, effort=None, max_to
          thinking="off", extra_args=None, before_attempt=None, on_attempt=None):
     """Run one model call with retries; always returns a record (never raises).
 
-    thinking="off" disables thinking where the api backend allows it (Haiku 5.5, Sonnet 5.5
-    at effort <= high); the cli backend cannot turn adaptive thinking off - use effort "low"
-    and read usage.thinking. The runner may supply before_attempt() (an optional
+    Omitted effort resolves to low; thinking="off" requests disabled thinking where the
+    api backend allows it. The CLI adapters do not apply this thinking control: they
+    use effort and retain reported usage.thinking (unknown is not zero). The runner
+    may supply before_attempt() (an optional
     remaining-time cap in seconds) and on_attempt(record) to enforce limits
     between physical retries without changing logical-call accounting.
     """
     system = system or DEFAULT_SYSTEM
+    effort = DEFAULT_EFFORT if effort is None else effort
     total = _empty_usage()
     any_usage = False
     missing_usage = set()
@@ -326,7 +335,9 @@ def call(prompt, system=None, *, backend="auto", model=None, effort=None, max_to
     out = {
         "backend": backend, "backend_requested": backend_requested,
         "model_requested": model, "model_served": rec.get("model_served"),
-        "effort": effort, "thinking": thinking, "ok": bool(rec.get("ok")), "error_kind": rec.get("error_kind"),
+        # Legacy thinking is a request, never evidence of the model's actual mode.
+        "effort": effort, "thinking": thinking, "thinking_requested": thinking,
+        "ok": bool(rec.get("ok")), "error_kind": rec.get("error_kind"),
         "error": rec.get("error"), "text": rec.get("text"), "structured": rec.get("structured"),
         "stop_reason": rec.get("stop_reason"), "usage": total if any_usage else None,
         "cost_usd": cost if cost_complete else None, "cost_basis": rec.get("cost_basis") if cost_complete else None,
@@ -340,7 +351,7 @@ def call(prompt, system=None, *, backend="auto", model=None, effort=None, max_to
     for key in ("thread_id", "unsupported_settings", "policy_refused"):
         if key in rec:
             out[key] = rec[key]
-    if backend == "codex":
+    if backend in ("codex", "claude"):
         out["unsupported_settings"] = [k for k, value in (("max_tokens", max_tokens), ("thinking", thinking))
                                        if value is not None]
     if out["ok"] and out["stop_reason"] == "max_tokens":
@@ -377,7 +388,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--backend", default="auto", choices=BACKENDS)
     ap.add_argument("--model", help="default: gpt-6-luna for Codex, haiku for Claude/API")
-    ap.add_argument("--effort")
+    ap.add_argument("--effort", help="default: low; raise only for a justified experiment")
     ap.add_argument("--system-file")
     ap.add_argument("--json", action="store_true", help="parse JSON from the reply")
     ap.add_argument("--calibrate", action="store_true")

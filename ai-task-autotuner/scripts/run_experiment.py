@@ -369,6 +369,14 @@ def run(ws, candidate, split, purpose, exp=None, limit=None, concurrency=None, t
         config["model"] = llm_call.resolve_model(config.get("model"), config["backend"])
     except ValueError as e:
         sys.exit(f"REFUSED: {e}")
+    # Pin the actual request default before hashing or recording the run. Older
+    # metadata with absent/null effort remains unknown and must not pool with low.
+    if config.get("effort") is None:
+        config["effort"] = llm_call.DEFAULT_EFFORT
+    # The adapter now isolates ambient thinking controls. Even an old recorded
+    # "low" may have been overridden by the shell. Pin this internal revision on
+    # every backend because a candidate can override its backend per call.
+    config["reasoning_controls_version"] = 1
     conc = concurrency or config.get("concurrency", 8)
     config["concurrency"] = conc
     config_hash = effective_config_fingerprint(config)

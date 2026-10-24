@@ -17,6 +17,7 @@ import export_deliverables  # noqa: E402
 import init_workspace  # noqa: E402
 import llm_call  # noqa: E402
 import run_experiment  # noqa: E402
+import workspace  # noqa: E402
 
 
 def installed(*names):
@@ -234,6 +235,124 @@ class PersistedBackendTest(unittest.TestCase):
                 config = common.read_json(run_dir / "meta.json")["config"]
                 self.assertEqual(config["backend"], override)
                 self.assertEqual(config["model"], expected)
+
+    def test_runner_pins_default_effort_in_dispatch_metadata_hash_and_export(self):
+        charter = self.initialize("--backend", "claude")
+        charter["backend"].pop("effort")
+        charter["backend"]["concurrency"] = 1
+        common.write_json(self.ws / "charter.json", charter)
+        answer = {"ok": True, "text": '{"label":"yes"}', "stop_reason": "end_turn",
+                  "usage": {"input": 2, "output": 3}, "cost_usd": 0, "wall_ms": 10}
+        for label, override, expected in (("missing", {}, "low"),
+                                          ("null", {"effort": None}, "low"),
+                                          ("explicit", {"effort": "high"}, "high")):
+            with self.subTest(case=label):
+                name = self.smoke_candidate(f"c-{label}", override)
+                with mock.patch.object(run_experiment, "gate_allows_runs", return_value=(True, "")), \
+                        mock.patch.object(run_experiment, "task_review_allows_runs", return_value=(True, "")), \
+                        mock.patch.object(run_experiment, "_cli_version", return_value="test-cli"), \
+                        mock.patch.object(llm_call, "_cli_attempt", return_value=answer) as dispatch, \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    run_dir = run_experiment.run(self.ws, name, "dev", "baseline")
+                    repeated = run_experiment.run(self.ws, name, "dev", "baseline", tag="repeat")
+                self.assertEqual(dispatch.call_count, 2)
+                self.assertTrue(all(call.args[3] == expected for call in dispatch.call_args_list))
+                meta = common.read_json(run_dir / "meta.json")
+                self.assertEqual(meta["config"]["effort"], expected)
+                self.assertEqual(meta["config_hash"], workspace.effective_config_fingerprint(meta["config"]))
+                self.assertEqual(common.read_json(repeated / "meta.json")["config_hash"], meta["config_hash"])
+                self.assertEqual(common.read_jsonl(run_dir / "calls.jsonl")[0]["effort"], expected)
+                recommendation = export_deliverables.recommend(self.ws, name, [run_dir])
+                self.assertEqual(recommendation["settings"]["effort"]["value"], expected)
+
+    def test_legacy_unknown_effort_cannot_be_reused_as_new_low_measurement(self):
+        charter = self.initialize("--backend", "claude")
+        charter["backend"].pop("effort")
+        charter["backend"]["concurrency"] = 1
+        common.write_json(self.ws / "charter.json", charter)
+        answer = {"ok": True, "text": '{"label":"yes"}', "stop_reason": "end_turn",
+                  "usage": {"input": 2, "output": 3}, "cost_usd": 0, "wall_ms": 10}
+        with mock.patch.object(run_experiment, "gate_allows_runs", return_value=(True, "")), \
+                mock.patch.object(run_experiment, "task_review_allows_runs", return_value=(True, "")), \
+                mock.patch.object(run_experiment, "_cli_version", return_value="test-cli"), \
+                mock.patch.object(llm_call, "_cli_attempt", return_value=answer) as dispatch, \
+                contextlib.redirect_stdout(io.StringIO()):
+            for label in ("missing", "null"):
+                with self.subTest(legacy_effort=label):
+                    name = self.smoke_candidate(f"c-legacy-{label}")
+                    run_dir = run_experiment.run(self.ws, name, "dev", "baseline")
+                    # Reproduce pre-default metadata without interpreting its unknown
+                    # historical CLI default as the current explicit low request.
+                    meta = common.read_json(run_dir / "meta.json")
+                    if label == "missing":
+                        meta["config"].pop("effort")
+                    else:
+                        meta["config"]["effort"] = None
+                    meta["config_hash"] = workspace.effective_config_fingerprint(meta["config"])
+                    common.write_json(run_dir / "meta.json", meta)
+                    old_bytes = (run_dir / "meta.json").read_bytes()
+                    dispatch.reset_mock()
+                    with self.assertRaisesRegex(SystemExit, "effective config changed"):
+                        run_experiment.run(self.ws, name, "dev", "baseline", tag="new-default")
+                    dispatch.assert_not_called()
+                    self.assertEqual((run_dir / "meta.json").read_bytes(), old_bytes)
+                    replacement = self.smoke_candidate(f"c-replacement-{label}")
+                    fresh = run_experiment.run(self.ws, replacement, "dev", "baseline")
+                    self.assertEqual(dispatch.call_args.args[3], "low")
+                    fresh_meta = common.read_json(fresh / "meta.json")
+                    self.assertEqual(fresh_meta["config"]["effort"], "low")
+                    self.assertNotEqual(fresh_meta["config_hash"], meta["config_hash"])
+
+    def test_cli_export_never_turns_a_requested_off_setting_into_an_effective_off_claim(self):
+        self.initialize("--backend", "claude")
+        run_dir = self.ws / "runs" / "thinking-request"
+        common.write_json(run_dir / "summary.json", {"units": 1})
+        common.append_jsonl(run_dir / "calls.jsonl", {
+            "thinking": "off", "thinking_requested": "off", "effort": "low",
+            "usage": {"input": 2, "output": 12, "thinking": 5},
+            "wall_ms": 1000, "api_ms": 700,
+        })
+        for backend in ("cli", "claude", "codex"):
+            with self.subTest(backend=backend):
+                common.write_json(run_dir / "meta.json", {
+                    "config": {"backend": backend, "model": "example", "effort": "low", "thinking": "off"},
+                })
+                rec = export_deliverables.recommend(self.ws, "c000-baseline", [run_dir])
+                setting = rec["settings"]["thinking"]
+                self.assertEqual(setting["requested"], "off")
+                self.assertEqual(setting["value"], "backend managed")
+                self.assertEqual(setting["measured_thinking_tokens_per_call"]["max"], 5)
+
+    def test_old_low_effort_without_environment_isolation_marker_cannot_be_repeated(self):
+        self.initialize("--backend", "claude")
+        name = self.smoke_candidate("c-old-low")
+        answer = {"ok": True, "text": '{"label":"yes"}', "stop_reason": "end_turn",
+                  "usage": {"input": 2, "output": 3}, "cost_usd": 0, "wall_ms": 10}
+        with mock.patch.object(run_experiment, "gate_allows_runs", return_value=(True, "")), \
+                mock.patch.object(run_experiment, "task_review_allows_runs", return_value=(True, "")), \
+                mock.patch.object(run_experiment, "_cli_version", return_value="test-cli"), \
+                mock.patch.object(llm_call, "_cli_attempt", return_value=answer) as dispatch, \
+                contextlib.redirect_stdout(io.StringIO()):
+            original = run_experiment.run(self.ws, name, "dev", "baseline")
+            meta = common.read_json(original / "meta.json")
+            self.assertEqual(meta["config"]["effort"], "low")
+            self.assertEqual(meta["config"].pop("reasoning_controls_version"), 1)
+            meta["config_hash"] = workspace.effective_config_fingerprint(meta["config"])
+            common.write_json(original / "meta.json", meta)
+            before = (original / "meta.json").read_bytes()
+            dispatch.reset_mock()
+            with self.assertRaisesRegex(SystemExit, "effective config changed"):
+                run_experiment.run(self.ws, name, "dev", "baseline", tag="isolated")
+            dispatch.assert_not_called()
+            self.assertEqual((original / "meta.json").read_bytes(), before)
+            # This field records the adapter's behavior, not a user-selectable knob.
+            replacement = self.smoke_candidate("c-new-low", {"reasoning_controls_version": 0})
+            fresh = run_experiment.run(self.ws, replacement, "dev", "baseline")
+            fresh_meta = common.read_json(fresh / "meta.json")
+            self.assertEqual(fresh_meta["config"]["reasoning_controls_version"], 1)
+            self.assertEqual(fresh_meta["config"]["effort"], "low")
+            self.assertEqual(dispatch.call_args.args[3], "low")
+            self.assertNotEqual(fresh_meta["config_hash"], meta["config_hash"])
 
     def test_codex_usd_budget_refuses_model_call_but_allows_code_only_candidate(self):
         charter = self.initialize(env={"CODEX_THREAD_ID": "session"})

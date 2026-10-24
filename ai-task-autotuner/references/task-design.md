@@ -95,7 +95,8 @@ Often the data holds positives only (pairs, links, past decisions) and the task 
 ## Baseline
 
 The simplest design that could work: one call per natural unit, complete instructions,
-JSON output with ids, effort `low`, thinking off where supported, no examples. Backend `auto`
+JSON output with ids, thinking off where supported (otherwise the lowest supported effort),
+no examples. A justified higher starting level is an exception described below. Backend `auto`
 selects Codex/Luna (`gpt-6-luna`) on Codex and Claude/Haiku on Claude; follow explicit choices
 and retain the resolved settings in the charter. If a no-model
 heuristic is plausible, measure it too - it calibrates whether the model adds value, and it
@@ -149,11 +150,29 @@ the design files and review the affected scope before measuring that changed des
 
 ## Thinking and output budget
 
-- Default: effort `low`, `thinking: "off"` where supported (honored on the api backend for
-  Haiku 5.5 and Sonnet 5.5). Neither CLI guarantees thinking off. Claude reports thinking
-  usage; Codex does not expose it separately, so record it as unreported.
-- Raise effort only as an experiment (`model.effort`) and keep it only if quality gains pay
-  for the extra output tokens and latency.
+- Default: request `thinking: "off"` where the selected model/backend can disable thinking;
+  otherwise use its lowest supported effort (`low` for the current default CLIs). Effort
+  `low` does not mean thinking is off. Record requested settings and their support separately;
+  unavailable thinking usage remains unreported, not zero.
+- Routine extraction, classification and matching start at that default. Multiple dependent
+  reasoning steps, difficult mathematics, planning or constraints spanning records can justify
+  trying more thinking. They do not automatically require it: code, a better representation or
+  a global solver may be sufficient.
+- An initial exception is allowed when current guidance for the selected model or verified
+  analogous tasks supports a benefit. Record that source/evidence, the relevant task mechanism
+  and the modest starting level in `experiment_plan.md`. Treat the benefit here as a hypothesis,
+  and compare with the default when the budget permits. Respect explicit user settings.
+- Otherwise, diagnose a concrete failure before raising effort: check data/reference/scorer
+  errors, missing context, conflicting instructions and an unsuitable representation first.
+  Test the next supported level as a `model.effort` experiment on the affected slice and the
+  same frozen evaluation, including guards and usage/latency. Retain it only for a justified
+  quality or contract-reliability benefit; a longer answer is not evidence of better reasoning.
+- If thinking is explicitly disabled, raising effort alone may not enable it. Configure the
+  supported thinking mode as well, and verify what the backend actually accepts. Never invent
+  an unsupported OFF switch or silently upgrade to the strongest model.
+- Apply extra thinking only to difficult cases when routing is reliable and dependencies stay
+  intact. After improving prompts or structure, test whether it can be lowered or disabled
+  again. Measure the entire pipeline, including routing and verification overhead.
 - `max_tokens` on supporting backends during experiments: generous enough that truncation never decides a result
   (watch `truncated` in analyze_run); the production value comes from the measured output
   distribution (`export_deliverables.py`). Codex CLI does not expose a supported per-response

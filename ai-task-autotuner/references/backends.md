@@ -25,6 +25,22 @@ On Codex, do not upgrade either model automatically. A stronger reference model 
 explicitly configured. Same-model reference agreement does not independently establish
 correctness; see [evaluation.md](evaluation.md).
 
+Default policy is thinking off where supported; otherwise use the lowest supported effort
+and report that fallback. The common call adapter resolves omitted effort to `low`, as do new
+workspaces. Explicit candidate effort is preserved. Unsupported levels are not silently retried
+at a higher setting or on a different model. A justified initial exception or later increase
+belongs in the experiment plan; see [task-design.md](task-design.md#thinking-and-output-budget).
+`thinking` and `thinking_requested` in call records describe the request, not observed absence
+of reasoning. CLI `unsupported_settings` records controls the adapter does not enforce.
+Both CLI exports show thinking as `backend managed` and preserve the requested setting separately.
+API exports also disclose off requests that the adapter does not apply, using per-call model,
+backend and effort overrides; observed positive thinking usage prevents an off claim.
+Historical missing/`null` effort remains unknown. New measurements resolve `low` and record
+`reasoning_controls_version` before configuration hashing, including runs that may override
+the backend per call. Use a new candidate to remeasure under this policy: old runs may have
+inherited unrecorded environment overrides, even when their recorded effort was `low`.
+Their history remains unchanged and is not pooled with the new reasoning-control policy.
+
 ## codex: `codex exec` as an API stand-in
 
 The adapter uses `codex exec --json --ephemeral --ignore-user-config`, read-only sandboxing,
@@ -102,7 +118,7 @@ Measured on 2026-10-18 (Claude Code 2.1.302, Haiku 5.5), expect drift - re-run
 - Thinking cannot be fully turned off through `claude -p` for Haiku 5.5: effort `low` still
   produced ~150-280 thinking tokens on a small arithmetic prompt (`MAX_THINKING_TOKENS=0` and
   `alwaysThinkingEnabled: false` did not stop it). Use effort `low` as the minimum, report
-  `usage.thinking`, and note that the api backend with thinking off would save those tokens.
+  `usage.thinking`; only an API/model that supports disabling thinking can test that alternative.
   Pass `--effort` explicitly; the CLI default may differ from the API default.
 - Quota: `claude -p` spends the same subscription limits as the session running the skill. A
   session-limit error (`error_kind: "quota"`) is not retried; the runner stops launching calls
@@ -116,6 +132,13 @@ Change the model with `--model haiku|sonnet|opus` or a full id in the charter's 
 a candidate's `config.json`. When the CLI reports a served model, it is recorded per call
 (`model_served`) and listed in the summary; check it matches what you asked for. A requested
 model name alone is not evidence of the served model.
+
+The adapter removes `CLAUDE_CODE_EFFORT_LEVEL`, `MAX_THINKING_TOKENS` and
+`CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` from the child environment so inherited reasoning
+settings do not override the candidate's effort or silently change its mode. Authentication
+and proxy variables are preserved. This isolation does not enforce thinking off or prove the
+server used the requested effort. The adapter's common `thinking` and `max_tokens` fields are
+not wired to Claude CLI controls and are marked unsupported when requested.
 
 ## api: Anthropic Messages API
 

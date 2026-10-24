@@ -97,6 +97,12 @@ and [conditional contracts](robustness.md) to investigate assumptions, informati
 scale before adding more instructions. A rewrite must preserve semantic decisions, including
 alternative conditions and global constraints; old-model answer equality is not the oracle.
 
+Increase thinking only after a diagnosed failure or a documented starting exception under
+[the thinking policy](task-design.md#thinking-and-output-budget). Change one supported level
+at a time and check the affected cases plus the frozen evaluation and guards. Where safe,
+route only the difficult subset to that level; retain shared constraints and count routing
+cost. Revisit the added thinking after prompt or structural improvements.
+
 **Efficiency / structure phase** - respect the quality bound, cut cost per unit, latency, or calls;
 simplify. Choose the order by expected gain and risk; structural waste may dominate wording:
 1. hygiene: remove instructions the model does not need, shrink input to what decisions use,
@@ -108,9 +114,10 @@ simplify. Choose the order by expected gain and risk; structural waste may domin
    screen plus a focused second pass only where needed (cascade); test shared context,
    compact attribute mappings and code joins when applicable. Preserve global constraints
    through reconciliation or a solver where possible; a single giant call is not required;
-4. model x effort staircase: from the current cell, step effort down; when quality holds,
-   step down; when it fails, step right at most 1-2 notches; prune cells projected to cost
-   more than the incumbent; stop when no unprobed cell is projected cheaper;
+4. model x effort staircase: try the next supported lower effort or thinking off; retain
+   the lower setting when quality and contracts hold. If it fails, keep the incumbent.
+   Consider a different model only with a concrete quality/cost hypothesis; do not respond
+   to every failure by upgrading. Stop when no unprobed cell is projected cheaper;
 5. re-check one quality lever on the cheaper configuration (prompt wins do not always transfer).
 
 Report cost per completed unit, not per call: a cheaper call that fails more is not cheaper.

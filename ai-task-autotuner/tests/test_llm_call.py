@@ -55,6 +55,54 @@ class LlmCallTest(unittest.TestCase):
         self.assertEqual(run.call_args[1]["input"], "hi")
         self.assertNotIn("CLAUDECODE", run.call_args[1]["env"])
 
+    def test_omitted_effort_sends_low_on_every_backend_and_preserves_explicit_choice(self):
+        answer = {"ok": True, "text": "ok", "cost_usd": 0, "usage": None}
+        for backend, adapter in (("claude", "_cli_attempt"), ("codex", "_codex_attempt"),
+                                 ("api", "_api_attempt")):
+            for supplied, expected in (({}, "low"), ({"effort": None}, "low"),
+                                       ({"effort": "high"}, "high")):
+                with self.subTest(backend=backend, supplied=supplied), \
+                        mock.patch.object(llm_call, adapter, return_value=answer) as dispatch:
+                    record = llm_call.call("task", backend=backend, **supplied)
+                self.assertEqual(dispatch.call_args.args[3], expected)
+                self.assertEqual(record["effort"], expected)
+                self.assertEqual(record["thinking_requested"], "off")
+
+    def test_claude_effort_is_not_overridden_by_parent_thinking_environment(self):
+        parent = {"CLAUDE_CODE_EFFORT_LEVEL": "max", "MAX_THINKING_TOKENS": "32000",
+                  "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "1",
+                  "ANTHROPIC_API_KEY": "test-only", "HTTPS_PROXY": "http://test-proxy.invalid"}
+        with mock.patch.dict(llm_call.os.environ, parent), \
+                mock.patch.object(llm_call.subprocess, "run", return_value=proc(envelope())) as run:
+            record = llm_call.call("task", backend="claude")
+            self.assertEqual(llm_call.os.environ["CLAUDE_CODE_EFFORT_LEVEL"], "max")
+        args, child = run.call_args.args[0], run.call_args.kwargs["env"]
+        self.assertEqual(args[args.index("--effort") + 1], "low")
+        self.assertEqual(record["effort"], "low")
+        for key in ("CLAUDE_CODE_EFFORT_LEVEL", "MAX_THINKING_TOKENS",
+                    "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING"):
+            self.assertNotIn(key, child)
+        self.assertEqual(child["ANTHROPIC_API_KEY"], parent["ANTHROPIC_API_KEY"])
+        self.assertEqual(child["HTTPS_PROXY"], parent["HTTPS_PROXY"])
+
+    def test_cli_thinking_request_is_not_reported_as_applied_off(self):
+        answer = {"ok": True, "text": "ok", "cost_usd": 0,
+                  "usage": {"input": 1, "output": 7, "thinking": 5}}
+        for backend, adapter in (("claude", "_cli_attempt"), ("codex", "_codex_attempt")):
+            with self.subTest(backend=backend), \
+                    mock.patch.object(llm_call, adapter, return_value=answer):
+                record = llm_call.call("task", backend=backend, thinking="off", max_tokens=20)
+            self.assertEqual(record["thinking_requested"], "off")
+            self.assertEqual(record["unsupported_settings"], ["max_tokens", "thinking"])
+            self.assertEqual(record["usage"]["thinking"], 5)
+
+    def test_cli_absent_controls_are_not_invented_as_unsupported_requests(self):
+        with mock.patch.object(llm_call.subprocess, "run", return_value=proc(envelope(thinking=None))):
+            record = llm_call.call("task", backend="cli", thinking=None, max_tokens=None)
+        self.assertIsNone(record["thinking_requested"])
+        self.assertEqual(record["unsupported_settings"], [])
+        self.assertIsNone(record["usage"]["thinking"])
+
     def test_retryable_error_then_success_sums_usage(self):
         seq = [proc(envelope("Overloaded", is_error=True, status=529), rc=1), proc(envelope())]
         with mock.patch.object(llm_call.subprocess, "run", side_effect=seq):

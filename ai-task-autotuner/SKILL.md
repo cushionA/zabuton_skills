@@ -61,10 +61,13 @@ unattended for a long time, so state lives on disk and the conversation stays sm
   easy items and validate outputs; the model handles what needs judgment. Always measure a
   no-model baseline when one is plausible. If code alone matches the model within noise, that is
   a headline finding: report it separately (`non_ai_findings.md`), even mid-run.
-- **Minimal thinking by default.** Start at effort `low` with thinking off where the backend
-  supports it. Neither CLI guarantees thinking off; Codex does not report separate thinking
-  tokens. Do not promise unsupported controls or fill unreported measurements with zeros.
-  More thinking is a lever to justify with measurements, not a default.
+- **Thinking off by default.** Disable thinking where the model/backend supports it;
+  otherwise start at the lowest supported effort (currently `low` for the default CLIs)
+  and disclose that thinking remains backend-managed. Raise it only for a diagnosed need.
+  A modest higher starting level is allowed when current model-specific guidance or
+  verified analogous tasks justify it; record the reason in `experiment_plan.md` and
+  measure the tradeoff. A task category alone is not proof that more thinking helps.
+  Do not promise unsupported controls or fill unreported thinking usage with zeros.
 - **Quota is shared.** CLI calls draw on the corresponding account's subscription limits.
   Estimate heavy jobs (reference building with a strong model, full runs) from a one-unit
   smoke run before launching them; keep concurrency moderate. On a quota error the runner stops

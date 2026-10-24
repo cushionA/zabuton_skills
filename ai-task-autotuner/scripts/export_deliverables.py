@@ -28,12 +28,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import append_jsonl, now_iso, percentile, read_json, read_jsonl, write_json  # noqa: E402
+from common import MODEL_ALIASES, append_jsonl, now_iso, percentile, read_json, read_jsonl, write_json  # noqa: E402
 from workspace import candidate_hash, data_fingerprint, eval_hash, list_runs  # noqa: E402
 from quality_gate import gate_allows_runs  # noqa: E402
 from task_review import task_review_allows_runs  # noqa: E402
 from relocate_workspace import relocate  # noqa: E402
 from ledger import KEEPS, _state as ledger_state  # noqa: E402
+from llm_call import API_THINKING_OFF  # noqa: E402
 
 
 def _round_up(x, step):
@@ -66,9 +67,40 @@ def recommend(ws, candidate, run_dirs):
     S["model"] = {"value": cfg.get("model"), "served": sorted({c.get("model_served") for c in calls if c.get("model_served")})}
     tried = sorted({str(r.get("config", {}).get("effort")) for r in list_runs(ws) if r.get("purpose") != "smoke"})
     S["effort"] = {"value": cfg.get("effort"),
-                   "why": f"as measured; efforts measured in this workspace: {tried} ('low' is the lowest level)"}
-    S["thinking"] = {"value": cfg.get("thinking", "off"),
+                   "why": f"requested setting; efforts measured in this workspace: {tried}; supported levels depend on the model"}
+    S["thinking"] = {"value": cfg.get("thinking", "off"), "requested": cfg.get("thinking", "off"),
                      "measured_thinking_tokens_per_call": {"p50": percentile(thinking, .5), "max": max(thinking) if thinking else None}}
+    if S["backend_measured"] in ("cli", "claude", "codex"):
+        S["thinking"]["value"] = "backend managed"
+        S["thinking"]["why"] = "the adapter does not enforce CLI thinking on/off; low effort is not thinking off"
+    elif S["backend_measured"] == "api" and S["thinking"]["requested"] == "off":
+        # A pipeline can override the model, backend or effort for individual calls.
+        # Workspace defaults alone cannot establish whether its off requests applied.
+        off_controls = []
+        for call in calls:
+            requested = call.get("thinking_requested", call.get("thinking"))
+            model = call.get("model_requested")
+            effort = call.get("effort")
+            if requested != "off":
+                off_controls.append(None)
+            elif call.get("backend") in ("cli", "claude", "codex"):
+                off_controls.append(False)
+            elif call.get("backend") != "api" or not model or effort is None:
+                off_controls.append(None)
+            else:
+                off_controls.append(MODEL_ALIASES.get(model, model) in API_THINKING_OFF
+                                    and effort not in ("xhigh", "max"))
+        if any(t > 0 for t in thinking):
+            S["thinking"]["value"] = "unverified"
+            S["thinking"]["why"] = "thinking tokens were reported despite the off request; investigate before claiming off"
+        elif False in off_controls:
+            S["thinking"]["value"] = "backend managed"
+            S["thinking"]["why"] = "at least one measured call did not apply the requested off control"
+        elif not off_controls or None in off_controls:
+            S["thinking"]["value"] = "unverified"
+            S["thinking"]["why"] = "call-level thinking settings are missing or mixed; defaults cannot establish off"
+        else:
+            S["thinking"]["why"] = "supported off request in this adapter; absent usage is not proof of zero thinking"
     if outs and S["backend_measured"] != "codex":
         mx, p99 = max(outs), percentile(outs, .99)
         mt = max(_round_up(mx * 1.5, 256), _round_up(p99 * 2, 256), 512)
@@ -79,7 +111,6 @@ def recommend(ws, candidate, run_dirs):
                                   "re-measure with a higher limit")
     if S["backend_measured"] == "codex":
         S["max_tokens"] = {"value": None, "why": "Codex CLI has no supported max-output-token flag"}
-        S["thinking"]["value"] = "backend managed"
         if wall:
             S["timeout_s"] = {"value": max(30, _round_up(3 * percentile(wall, .99) / 1000, 10)),
                               "why": "3 x p99 measured CLI wall time; API-only latency is not reported"}
@@ -113,8 +144,8 @@ def recommend(ws, candidate, run_dirs):
     E["unit_wall_ms_p50"] = percentile([s.get("unit_wall_ms", {}).get("p50") for s in summaries], .5)
     if S["backend_measured"] in ("cli", "claude"):
         rec["caveats"].append("measured through claude -p: ~800 extra input tokens per call and process start-up "
-                              "time that a direct API call would not have; the cli cannot turn thinking off, so the "
-                              "api backend with thinking off may produce fewer output tokens")
+                              "time were observed in the documented calibration; the adapter does not enforce "
+                              "thinking=off. Compare with an API only where that model supports disabling thinking")
     if any(s.get("ai_free") for s in summaries):
         rec["caveats"].append("this candidate makes no model calls: model settings do not apply")
     return rec
