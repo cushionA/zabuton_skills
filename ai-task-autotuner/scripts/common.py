@@ -359,17 +359,19 @@ def label_matches(pred, entry):
 # ---------------------------------------------------------------- prices / cost
 
 # USD per million tokens (first-party list prices; update when they change).
+# "cache_read" is the published cache-read price where it is not 0.1x input.
 PRICES = {
     "claude-haiku-5-5": {"in": 0.10, "out": 0.50, "in_long": 0.50, "out_long": 2.50, "long_from": 100_000},
-    "claude-sonnet-5-5": {"in": 2.00, "out": 10.00},
-    "claude-opus-5-5": {"in": 4.00, "out": 20.00},
-    "claude-fable-5-1": {"in": 10.00, "out": 50.00},
+    "claude-sonnet-5-5": {"in": 2.00, "out": 10.00, "cache_read": 0.20},
+    "claude-opus-5-5": {"in": 4.00, "out": 20.00, "cache_read": 0.20},
+    "claude-fable-5-1": {"in": 10.00, "out": 50.00, "cache_read": 0.25},
 }
 MODEL_ALIASES = {"haiku": "claude-haiku-5-5", "sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5"}
 
 
 def estimate_cost(model, usage, prices=None):
-    """List-price estimate: cache writes 1.25x input, cache reads 0.1x input."""
+    """List-price estimate: cache writes 1.25x input; cache reads at the model's published
+    price, else 0.1x input."""
     table = dict(PRICES)
     table.update(prices or {})
     model = MODEL_ALIASES.get(model, model)
@@ -383,7 +385,8 @@ def estimate_cost(model, usage, prices=None):
     long_ctx = p.get("long_from") and (inp + cr + cw) > p["long_from"]
     pin = p["in_long"] if long_ctx else p["in"]
     pout = p["out_long"] if long_ctx else p["out"]
-    return (inp * pin + cw * pin * 1.25 + cr * pin * 0.1 + out * pout) / 1e6
+    pread = p.get("cache_read", pin * 0.1)
+    return (inp * pin + cw * pin * 1.25 + cr * pread + out * pout) / 1e6
 
 
 # ---------------------------------------------------------------- splits
