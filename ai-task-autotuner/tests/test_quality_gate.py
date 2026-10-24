@@ -166,6 +166,27 @@ class ReviewApprovalTest(unittest.TestCase):
         self.run_cli("--accept-review", "test fixture: approve full current evidence", expected=0)
         self.assertTrue(quality_gate.gate_allows_runs(self.ws)[0])
 
+    def assert_stops(self):
+        self.run_cli(expected=3)
+        self.assertEqual(self.gate()["status"], "STOP")
+        self.assertFalse(quality_gate.gate_allows_runs(self.ws)[0])
+
+    def test_malformed_custom_findings_stop_instead_of_passing(self):
+        for updates in ({"severity": "High"}, {"severity": "error"}, {"severity": "critical "},
+                        {"severity": None}, {"id": ""}, {"title": None}, {"known": "false"}):
+            with self.subTest(updates=updates):
+                self.set_custom_finding(**updates)
+                self.assert_stops()
+                self.assertIn("checks-invalid-finding", [f["id"] for f in self.gate()["findings"]])
+        common.write_json(self.audit / "findings.json", {"id": "not-a-list"})
+        self.assert_stops()
+
+    def test_close_read_defect_with_unlisted_severity_or_string_known_blocks(self):
+        self.write_close_read([self.defect("A", severity="High")])
+        self.assert_stops()
+        self.write_close_read([dict(self.defect("A"), known="false")])
+        self.assert_requires_review()
+
 
 if __name__ == "__main__":
     unittest.main()

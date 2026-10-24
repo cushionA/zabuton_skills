@@ -14,10 +14,13 @@ checks.py must define `run_checks(ctx) -> list[dict]`; each finding is
 included"); it is reported as a known limitation and does not block. A user's general
 acceptance of a limitation does not cover specific defects found later - those are new
 findings. Unknown critical -> STOP, unknown high -> REVIEW. Only the user may accept a REVIEW.
+A malformed finding (unlisted severity such as "High", missing id/title, non-boolean known)
+becomes a critical `checks-invalid-finding`: a typo must never let the gate pass.
 
 Close-read verdicts go to WS/audit/close_read.jsonl, one line per unit read:
   {"id": "<unit id>", "verdict": "ok|hard|ambiguous|defect", "evidence": "...", "severity": "high"}
-`defect` lines become a finding (severity from the lines, default high); `ambiguous` lines medium.
+`defect` lines become a finding (severity from the lines, default high; an unlisted severity
+counts as critical); `ambiguous` lines medium.
 Missing procedure artifacts (profile, data_audit.md, checks.py, close_read.jsonl) give
 INCOMPLETE: finish the audit, do not report to the user.
 REVIEW/STOP pause the time-limit clock (ledger.jsonl); --accept-review resumes it.
@@ -144,7 +147,8 @@ class Ctx:
             self.source_errors.append(str(e))
 
     def finding(self, id, severity, title, evidence="", affected=None, known=False, recommendation=""):
-        assert severity in SEVERITIES + ("procedure",), severity
+        if severity not in SEVERITIES + ("procedure",):
+            raise ValueError(f"unknown severity {severity!r}; use one of {', '.join(SEVERITIES)}")
         return {"id": id, "severity": severity, "title": title, "evidence": evidence,
                 "affected": affected, "known": known, "recommendation": recommendation}
 
@@ -175,6 +179,34 @@ def builtin_checks(ctx):
     return out
 
 
+def _checked_findings(ctx, raw):
+    """Fail closed: a finding the gate cannot classify is a blocking finding, not a pass."""
+    if raw is None:
+        return []
+    if isinstance(raw, (str, bytes, dict)) or not hasattr(raw, "__iter__"):
+        return [ctx.finding("checks-invalid-finding", "critical", "run_checks must return a list of findings",
+                            evidence=repr(raw)[:300])]
+    out = []
+    for i, f in enumerate(raw):
+        if not isinstance(f, dict):
+            problem = "not an object"
+        elif not isinstance(f.get("id"), str) or not f["id"].strip():
+            problem = "missing id"
+        elif f.get("severity") not in SEVERITIES + ("procedure",):
+            problem = f"unknown severity {f.get('severity')!r}; use one of {', '.join(SEVERITIES)}"
+        elif not isinstance(f.get("title"), str) or not f["title"].strip():
+            problem = "missing title"
+        elif not isinstance(f.get("known", False), bool):
+            problem = "known must be true or false"
+        else:
+            out.append(f)
+            continue
+        out.append(ctx.finding("checks-invalid-finding", "critical", f"checks.py finding {i}: {problem}",
+                               evidence=json.dumps(f, ensure_ascii=False, default=repr)[:300],
+                               recommendation="fix the finding in audit/checks.py and re-run quality_gate.py"))
+    return out
+
+
 def close_read_findings(ctx):
     rows = read_jsonl(ctx.ws / "audit" / "close_read.jsonl")
     if not rows:
@@ -185,10 +217,11 @@ def close_read_findings(ctx):
     defects = [r for r in rows if r.get("verdict") == "defect"]
     if defects:
         order = {s: i for i, s in enumerate(SEVERITIES)}
-        sev = min((r.get("severity", "high") for r in defects), key=lambda x: order.get(x, 1))
+        severities = [r.get("severity", "high") for r in defects]
+        sev = min((s if s in order else "critical" for s in severities), key=order.get)
         out.append(ctx.finding("close-read-defects", sev, f"{len(defects)} units look defective on close reading",
                                evidence="; ".join(f"{r['id']}: {str(r.get('evidence', ''))[:80]}" for r in defects[:5]),
-                               affected=[r["id"] for r in defects], known=all(r.get("known") for r in defects),
+                               affected=[r["id"] for r in defects], known=all(r.get("known") is True for r in defects),
                                recommendation="report ids and evidence; let the user decide how to score them"))
     amb = [r for r in rows if r.get("verdict") == "ambiguous"]
     if amb:
@@ -271,9 +304,13 @@ def evaluate(ws):
     checks_path = ws / "audit" / "checks.py"
     if checks_path.exists():
         try:
-            findings += list(load_module(checks_path, "audit_checks").run_checks(ctx) or [])
+            raw = load_module(checks_path, "audit_checks").run_checks(ctx)
+            if raw is not None and not isinstance(raw, (str, bytes, dict)) and hasattr(raw, "__iter__"):
+                raw = list(raw)  # a generator that fails part-way is a crash, not a partial audit
         except Exception as e:  # a crashing check is itself a blocking finding
             findings.append(ctx.finding("checks-crashed", "critical", f"checks.py raised {type(e).__name__}: {e}"))
+        else:
+            findings += _checked_findings(ctx, raw)
     else:
         findings.append(ctx.finding("checks-missing", "high", "audit/checks.py missing"))
     try:
