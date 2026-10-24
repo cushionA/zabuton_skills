@@ -209,6 +209,9 @@ class CoverageTest(unittest.TestCase):
         for n in range(2):
             run = self.ws / f"reference_r{n}"
             run.mkdir()
+            common.write_json(run / "meta.json", {"run_id": run.name, "purpose": "reference", "split": "dev",
+                                                  "candidate": "ref-a", "data_hash": workspace.data_fingerprint(self.ws),
+                                                  "config": {"model": "test-model"}})
             for u in self.units["dev"]:
                 common.append_jsonl(run / "outputs.jsonl", {"id": u["id"], "status": "ok",
                                                             "output": {"items": [{"key": "a", "label": "pos"}]}})

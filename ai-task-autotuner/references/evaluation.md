@@ -148,7 +148,10 @@ final holdout feedback. A peek cap is not a guarantee against adaptive overfitti
 3. Run the reference candidate twice on dev and holdout (`--purpose reference`) after task
    review. Holdout reference preparation writes outputs without target grading or a target peek;
    never use the reference path to test the candidate being tuned. Then
-   `reference.py merge WS RUN_A RUN_B --split dev` (needs `score.flatten`).
+   `reference.py merge WS RUN_A RUN_B --split dev` (needs `score.flatten`). It refuses the
+   same run twice, non-reference purposes, another split, outputs from changed data and
+   candidates in the experiment ledger, and records the merged runs in
+   `eval/reference/<split>.merge.json`.
 4. Adjudicate every disagreement by reading the source data (or with a subagent for
    volume): a label, an `acceptable` set for genuinely ambiguous items, or `exclude` for data
    defects (report them). For holdout, delegate adjudication to a subagent and look only at

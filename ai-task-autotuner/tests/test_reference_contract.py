@@ -44,8 +44,15 @@ class ReferenceContractTest(unittest.TestCase):
         self.run_b = self.ws / "reference-b"
         for run in (self.run_a, self.run_b):
             run.mkdir()
-            common.write_json(run / "meta.json", {"config": {"model": "test-model"}})
+            self.write_meta(run)
             self.write_records(run, [self.record()])
+
+    def write_meta(self, run, **updates):
+        meta = {"run_id": run.name, "purpose": "reference", "split": "dev", "candidate": f"ref-{run.name}",
+                "candidate_hash": f"hash-{run.name}", "config_hash": "config", "data_hash": workspace.data_fingerprint(self.ws),
+                "config": {"backend": "claude", "model": "test-model"}}
+        meta.update(updates)
+        common.write_json(run / "meta.json", meta)
 
     def record(self, output=None, unit="u"):
         if output is None:
@@ -181,6 +188,46 @@ class ReferenceContractTest(unittest.TestCase):
                 self.merge()
                 self.assertEqual(len(common.read_jsonl(self.agreed)), 2)
                 self.assertEqual(common.read_jsonl(self.disagreements), [])
+
+    def test_same_run_twice_cannot_become_a_reference(self):
+        self.run_b = self.run_a
+        self.assert_refused_without_replacing_reference("same run")
+        copy = self.ws / "reference-copy"
+        shutil.copytree(self.run_a, copy)
+        self.run_b = copy
+        self.assert_refused_without_replacing_reference("cannot verify itself")
+
+    def test_only_complete_current_reference_runs_of_the_split_merge(self):
+        cases = ((dict(purpose="smoke"), "--purpose reference"), (dict(purpose=None), "--purpose reference"),
+                 (dict(split="holdout"), "not 'dev'"), (dict(data_hash="old"), "different source data"))
+        for updates, phrase in cases:
+            with self.subTest(updates=updates):
+                self.write_meta(self.run_b, **updates)
+                self.assert_refused_without_replacing_reference(phrase, run=self.run_b)
+        self.write_meta(self.run_b)
+        (self.run_b / "meta.json").unlink()
+        self.assert_refused_without_replacing_reference("no meta.json", run=self.run_b)
+        self.write_meta(self.run_b)
+        common.write_json(self.run_b / "summary.json", {"quota_exhausted": True})
+        self.assert_refused_without_replacing_reference("incomplete", run=self.run_b)
+
+    def test_candidate_in_the_experiment_ledger_cannot_label_itself(self):
+        self.write_meta(self.run_b, candidate="c003-tuned")
+        common.append_jsonl(self.ws / "ledger.jsonl", {"event": "propose", "exp": "E003", "candidate": "c003-tuned"})
+        self.assert_refused_without_replacing_reference("experiment ledger", run=self.run_b)
+
+    def test_merge_records_the_runs_it_used(self):
+        self.merge()
+        record = common.read_json(self.ws / "eval/reference/dev.merge.json")
+        self.assertEqual([run["run_id"] for run in record["runs"]], ["reference-a", "reference-b"])
+        self.assertEqual((record["agreed"], record["disagreements"]), (2, 0))
+        self.assertFalse(record["same_candidate_and_config"])
+        self.write_meta(self.run_b, candidate_hash="hash-reference-a")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            reference.merge(self.ws, self.run_a, self.run_b, "dev")
+        self.assertTrue(common.read_json(self.ws / "eval/reference/dev.merge.json")["same_candidate_and_config"])
+        self.assertIn("self-consistency", out.getvalue())
 
 
 if __name__ == "__main__":

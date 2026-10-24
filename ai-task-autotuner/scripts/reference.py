@@ -5,6 +5,9 @@
       score.flatten(unit, output) -> {key: label}. Agreements go to
       eval/reference/<split>.jsonl (source "agree:<model>"); disagreements and items
       missing from either run go to <split>.disagreements.jsonl for adjudication.
+      Both runs must be distinct, complete --purpose reference runs of this split on the
+      current data, from a candidate outside the experiment ledger. <split>.merge.json
+      records which runs were merged.
   python reference.py status WS [--split dev]
   python reference.py export-csv WS --split dev --out review.csv [--sample 40]
       Sheet for a human check (disagreements first, then a random sample of agreements).
@@ -26,8 +29,30 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import append_jsonl, json_label_equal, load_reference, read_json, read_jsonl  # noqa: E402
-from workspace import load_eval  # noqa: E402
+from common import append_jsonl, json_label_equal, load_reference, now_iso, read_json, read_jsonl, write_json  # noqa: E402
+from workspace import data_fingerprint, ledger_rows, load_eval  # noqa: E402
+
+
+def _reference_meta(run_dir, split, data_hash, tuned):
+    """A reference needs two real reference runs; anything else cannot become a label source."""
+    name = Path(run_dir).name
+    meta = read_json(Path(run_dir) / "meta.json", {})
+    if not isinstance(meta, dict) or not meta:
+        sys.exit(f"REFUSED: {name} has no meta.json; merge runs made by run_experiment.py")
+    if meta.get("purpose") != "reference":
+        sys.exit(f"REFUSED: {name} is a {meta.get('purpose')!r} run; merge only --purpose reference runs")
+    if meta.get("split") != split:
+        sys.exit(f"REFUSED: {name} covers split {meta.get('split')!r}, not {split!r}")
+    if meta.get("data_hash") != data_hash:
+        sys.exit(f"REFUSED: {name} was generated from different source data or units; rerun it")
+    if meta.get("candidate") in tuned:
+        sys.exit(f"REFUSED: {name} comes from {meta['candidate']}, a candidate in the experiment ledger; "
+                 "build references with a separate reference candidate")
+    summary = read_json(Path(run_dir) / "summary.json", {})
+    broken = [flag for flag in ("quota_exhausted", "policy_exhausted", "data_changed") if summary.get(flag)]
+    if broken:
+        sys.exit(f"REFUSED: {name} is incomplete ({', '.join(broken)}); rerun it")
+    return meta
 
 
 def _flatten_run(ws, run_dir, units_by_id, score_mod):
@@ -65,6 +90,14 @@ def merge(ws, run_a, run_b, split):
     if not hasattr(score_mod, "flatten"):
         sys.exit("score.py must define flatten(unit, output) -> {key: label} to merge references")
     units = {u["id"]: u for u in dataset.load_units(split)}
+    if Path(run_a).resolve() == Path(run_b).resolve():
+        sys.exit("REFUSED: RUN_A and RUN_B are the same run; a run cannot verify itself")
+    data_hash = data_fingerprint(ws)
+    tuned = {r.get("candidate") for r in ledger_rows(ws) if r.get("event") == "propose"}
+    meta_a = _reference_meta(run_a, split, data_hash, tuned)
+    meta_b = _reference_meta(run_b, split, data_hash, tuned)
+    if meta_a.get("run_id") is not None and meta_a.get("run_id") == meta_b.get("run_id"):
+        sys.exit(f"REFUSED: both directories hold run {meta_a['run_id']}; a run cannot verify itself")
     fa, ma = _flatten_run(ws, run_a, units, score_mod)
     fb, mb = _flatten_run(ws, run_b, units, score_mod)
     base = Path(ws) / "eval" / "reference"
@@ -82,8 +115,19 @@ def merge(ws, run_a, run_b, split):
         else:
             append_jsonl(dis_p, {"key": k, "a": a, "b": b, "missing": [x for x, f in (("a", fa), ("b", fb)) if k not in f]})
             n_dis += 1
+    same = all(meta_a.get(k) is not None and meta_a.get(k) == meta_b.get(k) for k in ("candidate_hash", "config_hash"))
+    write_json(base / f"{split}.merge.json", {
+        "created": now_iso(), "split": split, "data_hash": data_hash, "agreed": n_agree, "disagreements": n_dis,
+        "same_candidate_and_config": same,
+        "runs": [{**{k: m.get(k) for k in ("run_id", "candidate", "candidate_hash", "config_hash", "started")},
+                  "backend": (m.get("config") or {}).get("backend"), "model": (m.get("config") or {}).get("model")}
+                 for m in (meta_a, meta_b)],
+        "note": "machine record of the merged runs; tier, adjudication and human checks go in eval/reference_provenance.json",
+    })
     total = n_agree + n_dis
     print(f"merged: {n_agree} agreed, {n_dis} to adjudicate ({n_dis / total:.1%} disagreement)" if total else "nothing to merge")
+    if same:
+        print("WARNING: both runs used the same candidate and settings; agreement mostly measures self-consistency")
 
 
 def status(ws, split):
