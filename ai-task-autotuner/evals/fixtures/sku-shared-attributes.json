@@ -1,0 +1,159 @@
+{
+  "synthetic": true,
+  "task_contract": {
+    "goal": "Map each actual source SKU to an actual target SKU of the same product. Return matched, no_match, or ambiguous with candidate IDs.",
+    "product_identity": "Exact canonical_product_code; display titles are not identity keys.",
+    "variant_identity": [
+      "edition",
+      "canonical_color",
+      "size",
+      "pack_count"
+    ],
+    "source_color_dictionary": {
+      "standard": {
+        "B1": "blue",
+        "W1": "white"
+      },
+      "limited": {
+        "B1": "black"
+      }
+    },
+    "target_color_dictionary": {
+      "青": "blue",
+      "白": "white",
+      "黒": "black"
+    },
+    "cardinality": "One-to-one mapping: a target SKU cannot be assigned to two source SKUs. A collision without distinguishing evidence is ambiguous, not resolved by row order.",
+    "absence": "Only listed SKU records exist. Do not create a Cartesian product of attribute values.",
+    "ambiguity": "Multiple equally valid target IDs remain ambiguous; do not choose the first."
+  },
+  "source_product": {
+    "id": "p-src",
+    "canonical_product_code": "TEE17",
+    "title": "Training shirt",
+    "brand": "Example",
+    "material": "cotton"
+  },
+  "source_variants": [
+    {
+      "id": "s1",
+      "product_id": "p-src",
+      "edition": "standard",
+      "color_code": "B1",
+      "size": "S",
+      "pack_count": 1
+    },
+    {
+      "id": "s2",
+      "product_id": "p-src",
+      "edition": "standard",
+      "color_code": "B1",
+      "size": "M",
+      "pack_count": 1
+    },
+    {
+      "id": "s3",
+      "product_id": "p-src",
+      "edition": "limited",
+      "color_code": "B1",
+      "size": "M",
+      "pack_count": 1
+    },
+    {
+      "id": "s4",
+      "product_id": "p-src",
+      "edition": "standard",
+      "color_code": "W1",
+      "size": "M",
+      "pack_count": 1
+    },
+    {
+      "id": "s5",
+      "product_id": "p-src",
+      "edition": "standard",
+      "color_code": "W1",
+      "size": "L",
+      "pack_count": 1
+    }
+  ],
+  "target_products": [
+    {
+      "id": "p-target",
+      "canonical_product_code": "TEE17",
+      "title": "Training shirt - colors and sizes",
+      "brand": "Example",
+      "material": "cotton"
+    },
+    {
+      "id": "p-other",
+      "canonical_product_code": "TEE18",
+      "title": "Training shirt",
+      "brand": "Example",
+      "material": "cotton"
+    }
+  ],
+  "target_variants": [
+    {
+      "id": "t1",
+      "product_id": "p-target",
+      "edition": "standard",
+      "color": "青",
+      "size": "S",
+      "pack_count": 1
+    },
+    {
+      "id": "t2",
+      "product_id": "p-target",
+      "edition": "standard",
+      "color": "青",
+      "size": "M",
+      "pack_count": 2
+    },
+    {
+      "id": "t3",
+      "product_id": "p-target",
+      "edition": "limited",
+      "color": "黒",
+      "size": "M",
+      "pack_count": 1
+    },
+    {
+      "id": "t4",
+      "product_id": "p-target",
+      "edition": "standard",
+      "color": "白",
+      "size": "M",
+      "pack_count": 1
+    },
+    {
+      "id": "t5",
+      "product_id": "p-target",
+      "edition": "standard",
+      "color": "白",
+      "size": "M",
+      "pack_count": 1
+    },
+    {
+      "id": "t6",
+      "product_id": "p-other",
+      "edition": "standard",
+      "color": "白",
+      "size": "L",
+      "pack_count": 1
+    }
+  ],
+  "mutation_probes": [
+    {
+      "id": "permutation",
+      "transform": "Reverse both variant arrays, preserving IDs and values."
+    },
+    {
+      "id": "capacity_collision",
+      "transform": "Append a copy of s1 with new ID s6. Both records are in scope; no extra fact distinguishes them."
+    },
+    {
+      "id": "unseen_code",
+      "transform": "Change s3 color_code to X9, which is absent from the dictionary."
+    }
+  ]
+}

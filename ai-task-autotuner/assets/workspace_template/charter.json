@@ -1,0 +1,52 @@
+{
+  "task": "",
+  "brief": "",
+  "created": "",
+  "created_epoch": 0,
+  "skill_dir": "",
+  "data": {
+    "inputs": [],
+    "aux": [],
+    "scope_notes": "what is in scope, what is excluded and why (counts against the original totals)"
+  },
+  "backend": {
+    "backend": "auto",
+    "model": "auto",
+    "effort": "low",
+    "thinking": "off",
+    "concurrency": 6,
+    "timeout_s": 300,
+    "retries": 2
+  },
+  "reference_model": "auto",
+  "primary": {
+    "metric": "primary",
+    "direction": "max",
+    "item_direction": "max",
+    "description": "what the headline number means, in one sentence",
+    "null_max": 0.0,
+    "oracle_min": 0.999,
+    "ceiling": 1.0
+  },
+  "guards": [],
+  "targets": {
+    "quality": null,
+    "efficiency": null
+  },
+  "efficiency_metric": "cost_uncached_list_usd_per_unit",
+  "limits": {
+    "max_cost_usd": null,
+    "max_hours": null,
+    "max_experiments": null,
+    "deadline": null
+  },
+  "loop": {
+    "patience": 5,
+    "min_delta": null,
+    "min_efficiency_gain": 0.1,
+    "max_holdout_evals": 3
+  },
+  "phase": "quality",
+  "quality_floor": null,
+  "noise": null
+}

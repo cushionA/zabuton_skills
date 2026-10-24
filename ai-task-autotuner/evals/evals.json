@@ -1,0 +1,483 @@
+{
+  "skill_name": "ai-task-autotuner",
+  "evals": [
+    {
+      "id": 1,
+      "name": "sku-matching-no-labels",
+      "prompt": "添付データ（DATA_DIR）を使って、楽天→au PAYマーケットのSKU突合をするAIタスクを設計して、実測しながら改善して。APIはclaude -pで代用、モデルはhaiku。データの案内文はBRIEF_PATHに置いた。ボリュームテスト版じゃなくて通常使用版を使うこと（au_only_stressは使わない）。停止条件は特にないので、改善の限界まで回して。データに問題があれば動く前に報告して。",
+      "expected_output": "Data audit with gate before any data-bearing model call (check duplicate products across pairs, unverified pairs, missing labels); experiment plan; reference only with the configured and authorized model, with stronger models requiring explicit authorization; same-model agreement is not independent correctness; baseline x2 and validation; experiments with keep/discard by noise; efficiency phase; stops at plateau; protected holdout; Japanese report covering the reporting requirements without calling reference agreement accuracy. Report unavailable backend measurements honestly.",
+      "files": [
+        "DATA_DIR",
+        "BRIEF_PATH"
+      ],
+      "mode": "integration_requires_external_data",
+      "requires": [
+        "External fixture paths substituted by the evaluator",
+        "Explicit run authorization, available backend credentials, and applicable spending/time limits"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "au-to-rakuten-product-identification",
+      "prompt": "同じデータ（DATA_DIR）を応用して、au PAYマーケットの商品1件を入力に、楽天側の複数の商品候補の中から同一商品を特定する（同一商品がなければ「該当なし」）AIタスクを作って最適化して。正解には商品ペアの対応情報を使っていい。モデルはhaiku（claude -p）。予算は合計$3、時間は2時間まで。データに問題があれば動く前に報告して。",
+      "expected_output": "Audit notices that pair labels are unverified and that several Rakuten products appear in multiple pairs / near-duplicate titles (ambiguous gold), handles them (acceptable sets or grouping) or reports before running; designs candidate pools incl. no-match cases; metrics with false-positive guard; respects $3 / 2h limits; efficiency phase uses deterministic pre-filtering; holdout; Japanese report.",
+      "files": [
+        "DATA_DIR"
+      ],
+      "mode": "integration_requires_external_data",
+      "requires": [
+        "External fixture paths substituted by the evaluator",
+        "Explicit run authorization, available backend credentials, and applicable spending/time limits"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "sku-factorization-with-sparse-and-dependent-variants",
+      "mode": "offline_design",
+      "prompt": "これはオフラインの設計レビューです。新しいモデル/API呼び出しや有料ベンチマークはせず、FIXTURE_ROOT/sku-shared-attributes.json を読み、タスク契約、最小の処理案、プロンプト/入出力設計、異常・境界・変形テスト、評価方法を日本語で具体化してください。必要ならローカルの決定的な計算は可。既知の事実と未測定の仮説を区別し、測定済みやPASSを捏造しないでください。反復する処理や規模増大を踏まえて、最小の処理案を選んでください。各source SKUの結果とmutation probeの期待関係を示し、正確性・入出力トークン・呼び出し回数をどう比較するか説明してください。",
+      "files": [
+        "fixtures/sku-shared-attributes.json"
+      ],
+      "expected_output": "A product-level plan that shares common context, derives conditional attribute mappings, joins only actual SKU records, and validates one-to-one constraints. Code-only processing is sufficient for this fully specified fixture; LLM use for future unknown mappings is a separate hypothesis.",
+      "assertions": [
+        {
+          "id": "3.1",
+          "criterion": "Separates canonical product identity from variant identity and shared versus per-SKU data.",
+          "critical": true
+        },
+        {
+          "id": "3.2",
+          "criterion": "Maps B1 conditionally on edition; does not infer one global B1 color.",
+          "critical": true
+        },
+        {
+          "id": "3.3",
+          "criterion": "Joins only actual records and retains pack_count and product identity; does not invent missing Cartesian variants.",
+          "critical": true
+        },
+        {
+          "id": "3.4",
+          "criterion": "Returns the exact base fixture decisions, including ambiguity rather than first-match tie breaking.",
+          "critical": true
+        },
+        {
+          "id": "3.5",
+          "criterion": "Checks target capacity globally; the s6 mutation creates an unresolved conflict for s1/s6 at t1.",
+          "critical": true
+        },
+        {
+          "id": "3.6",
+          "criterion": "Keeps decisions invariant under row permutation; treats unseen X9 as unresolved rather than a proven no-match.",
+          "critical": false
+        },
+        {
+          "id": "3.7",
+          "criterion": "Proposes compact ID/mapping output, avoiding repeated product prose; compares total input/output tokens and calls per fixed job or source product.",
+          "critical": false
+        },
+        {
+          "id": "3.8",
+          "criterion": "Does not claim factorization is always linear or independently valid for arbitrary dependent attributes; states fallback conditions and tests.",
+          "critical": true
+        }
+      ],
+      "naive_failure_modes": [
+        "Per-pair prompts repeat shared product descriptions.",
+        "Independent B1 mapping confuses the limited edition.",
+        "Cartesian expansion invents unavailable variants.",
+        "First target wins hides ambiguity; per-row matching reuses capacity."
+      ],
+      "expected_fixture_results": {
+        "s1": {
+          "status": "matched",
+          "target_ids": [
+            "t1"
+          ]
+        },
+        "s2": {
+          "status": "no_match",
+          "target_ids": []
+        },
+        "s3": {
+          "status": "matched",
+          "target_ids": [
+            "t3"
+          ]
+        },
+        "s4": {
+          "status": "ambiguous",
+          "target_ids": [
+            "t4",
+            "t5"
+          ]
+        },
+        "s5": {
+          "status": "no_match",
+          "target_ids": []
+        },
+        "capacity_collision": "s1 and s6 cannot both be assigned t1; both remain unresolved pending extra evidence",
+        "unseen_code": "s3 unresolved because dictionary coverage is missing"
+      }
+    },
+    {
+      "id": 4,
+      "name": "threshold-skew-and-output-cardinality",
+      "mode": "offline_design",
+      "prompt": "これはオフラインの設計レビューです。新しいモデル/API呼び出しや有料ベンチマークはせず、FIXTURE_ROOT/workload-scaling.json を読み、タスク契約、最小の処理案、プロンプト/入出力設計、異常・境界・変形テスト、評価方法を日本語で具体化してください。必要ならローカルの決定的な計算は可。既知の事実と未測定の仮説を区別し、測定済みやPASSを捏造しないでください。既存routerの閾値直前/一致/直後、同じ総件数でも偏った群、出力件数Kによる下限を評価してください。入力を2倍にしたら必ず実行時間4倍、候補数は常に非増加、というassertionも妥当か判断してください。",
+      "files": [
+        "fixtures/workload-scaling.json"
+      ],
+      "expected_output": "A cost and correctness model separating N, M, group skew, emitted K, token limits, and runtime. Boundary routing and counts are computed; candidate pruning and batching are conditional on recall and complete-output requirements.",
+      "assertions": [
+        {
+          "id": "4.1",
+          "criterion": "Tests <=10000 precisely: 9999 and 10000 use the permitted branch, 10001 does not; zero records yields zero pairs.",
+          "critical": true
+        },
+        {
+          "id": "4.2",
+          "criterion": "Computes sum_g N_g*M_g: balanced 10000 versus skewed 811900 despite equal totals N=M=1000.",
+          "critical": true
+        },
+        {
+          "id": "4.3",
+          "criterion": "Recognizes K=6 for the dense probe and an Omega(K) emission requirement; no top-k substitution or silent truncation.",
+          "critical": true
+        },
+        {
+          "id": "4.4",
+          "criterion": "Accounts for per-request input and output limits with compact schemas, chunking/streaming and completeness checks.",
+          "critical": true
+        },
+        {
+          "id": "4.5",
+          "criterion": "Does not equate asymptotic complexity with exact wall-time ratios; separates structural counts from repeated timing measurements.",
+          "critical": true
+        },
+        {
+          "id": "4.6",
+          "criterion": "Rejects unconditional candidate non-increase; uses subset monotonicity only when adding a restrictive filter to the same candidate universe.",
+          "critical": false
+        },
+        {
+          "id": "4.7",
+          "criterion": "Keeps the billing/evaluation denominator fixed when changing batches; estimates input/output tokens separately and labels them unmeasured.",
+          "critical": false
+        },
+        {
+          "id": "4.8",
+          "criterion": "Requires candidate recall evidence and guards for skew; does not promise a lossless bounded search without supporting assumptions.",
+          "critical": true
+        }
+      ],
+      "naive_failure_modes": [
+        "Average group size masks one huge group.",
+        "One giant batched prompt exceeds output limits.",
+        "Dropping matches improves cost by changing the task.",
+        "Exact 4x timing assertions flag valid cache/parallelism effects."
+      ],
+      "expected_fixture_results": {
+        "threshold_routes": [
+          "brute_force_permitted",
+          "brute_force_permitted",
+          "bounded_alternative_or_incomplete",
+          "empty_result"
+        ],
+        "balanced_candidates": 10000,
+        "skewed_candidates": 811900,
+        "dense_K": 6
+      }
+    },
+    {
+      "id": 5,
+      "name": "extraction-chunk-boundary-negation-and-evidence",
+      "mode": "offline_design",
+      "prompt": "これはオフラインの設計レビューです。新しいモデル/API呼び出しや有料ベンチマークはせず、FIXTURE_ROOT/extraction-boundaries.json を読み、タスク契約、最小の処理案、プロンプト/入出力設計、異常・境界・変形テスト、評価方法を日本語で具体化してください。必要ならローカルの決定的な計算は可。既知の事実と未測定の仮説を区別し、測定済みやPASSを捏造しないでください。各文書のbinding dateを示し、根拠spanの確認方法と、チャンク化・否定・改訂優先順位による失敗を防ぐ設計を作ってください。",
+      "files": [
+        "fixtures/extraction-boundaries.json"
+      ],
+      "expected_output": "An extraction contract preserving source evidence, amendment precedence, negation and cross-chunk context; compact outputs and deterministic span validation; chunking is tested rather than assumed lossless.",
+      "assertions": [
+        {
+          "id": "5.1",
+          "criterion": "Returns d1=2026-04-12, d2=null, d3=2026-04-12, d4=null.",
+          "critical": true
+        },
+        {
+          "id": "5.2",
+          "criterion": "Distinguishes draft dates, binding amendments and negated obligations; a date regex alone is not a sufficient semantic extractor.",
+          "critical": true
+        },
+        {
+          "id": "5.3",
+          "criterion": "Handles the d3 date split across chunks without hallucinating missing fragments or dropping the answer.",
+          "critical": true
+        },
+        {
+          "id": "5.4",
+          "criterion": "Validates source IDs and half-open evidence offsets against original text; supports multi-span evidence when needed.",
+          "critical": true
+        },
+        {
+          "id": "5.5",
+          "criterion": "Treats the quoted instruction in d4 as source data and does not obey it.",
+          "critical": true
+        },
+        {
+          "id": "5.6",
+          "criterion": "Defines rechunking invariance and a change control where changing the binding date must change the extraction.",
+          "critical": false
+        },
+        {
+          "id": "5.7",
+          "criterion": "Separates deterministic parsing/validation from semantic decisions and avoids generating full document copies.",
+          "critical": false
+        }
+      ],
+      "naive_failure_modes": [
+        "Extract-first-date returns a draft or negated date.",
+        "Independent chunking loses a date or its negation.",
+        "Generated evidence does not exist in source text.",
+        "An always-null extractor passes only negative cases."
+      ],
+      "expected_fixture_results": {
+        "d1": "2026-04-12",
+        "d2": null,
+        "d3": "2026-04-12",
+        "d4": null,
+        "binding_date_change": {
+          "d1": "2026-04-13"
+        },
+        "rechunk": "d3 date unchanged"
+      }
+    },
+    {
+      "id": 6,
+      "name": "classification-valid-and-invalid-metamorphic-relations",
+      "mode": "offline_design",
+      "prompt": "これはオフラインの設計レビューです。新しいモデル/API呼び出しや有料ベンチマークはせず、FIXTURE_ROOT/classification-relations.json を読み、タスク契約、最小の処理案、プロンプト/入出力設計、異常・境界・変形テスト、評価方法を日本語で具体化してください。必要ならローカルの決定的な計算は可。既知の事実と未測定の仮説を区別し、測定済みやPASSを捏造しないでください。各ticketのラベルを示し、提案されたshortcutの誤りと、成立する不変性テスト・必ず出力を変える対照テストを区別してください。領域外や情報不足を強制分類しない設計にしてください。",
+      "files": [
+        "fixtures/classification-relations.json"
+      ],
+      "expected_output": "A narrow classification contract with justified invariances, required changes, scoped unknown handling and evidence-backed rejection of overbroad metamorphic assumptions.",
+      "assertions": [
+        {
+          "id": "6.1",
+          "criterion": "Returns c1/c2/c4=urgent, c3=routine, c5/c6=unknown under the supplied policy.",
+          "critical": true
+        },
+        {
+          "id": "6.2",
+          "criterion": "Uses c1/c2 as a valid irrelevance invariance only under preserved semantics and available context budget.",
+          "critical": true
+        },
+        {
+          "id": "6.3",
+          "criterion": "Uses c1/c3 as a required-change control; does not make every transformation invariant.",
+          "critical": true
+        },
+        {
+          "id": "6.4",
+          "criterion": "Rejects a universal not-flips-label rule using the quoted historical negation in c4.",
+          "critical": true
+        },
+        {
+          "id": "6.5",
+          "criterion": "Includes unknown as a valid outcome for c5/c6 rather than silently excluding these cases from metrics.",
+          "critical": true
+        },
+        {
+          "id": "6.6",
+          "criterion": "States applicability conditions and tolerances/repeats for future stochastic-model tests, not semantic preservation by fiat.",
+          "critical": false
+        },
+        {
+          "id": "6.7",
+          "criterion": "Tests validity and semantics separately with compact label/ID output; does not infer model confidence calibration from these six cases.",
+          "critical": false
+        }
+      ],
+      "naive_failure_modes": [
+        "Keyword not classifier mishandles quotes.",
+        "Always-urgent classifier passes invariance but fails the necessary-change control.",
+        "Two-label schema forces out-of-domain false positives."
+      ],
+      "expected_fixture_results": {
+        "c1": "urgent",
+        "c2": "urgent",
+        "c3": "routine",
+        "c4": "urgent",
+        "c5": "unknown",
+        "c6": "unknown"
+      }
+    },
+    {
+      "id": 7,
+      "name": "correlated-false-oracle-and-rare-failure-diagnostics",
+      "mode": "offline_design",
+      "prompt": "これはオフラインの設計レビューです。新しいモデル/API呼び出しや有料ベンチマークはせず、FIXTURE_ROOT/false-oracle-rare-failures.json を読み、タスク契約、最小の処理案、プロンプト/入出力設計、異常・境界・変形テスト、評価方法を日本語で具体化してください。必要ならローカルの決定的な計算は可。既知の事実と未測定の仮説を区別し、測定済みやPASSを捏造しないでください。2つの参照が一致しているので正解とみなしてよいか、低頻度boundaryの回帰を平均で見逃さないかをレビューしてください。別サービス間の不一致を自動的にバグ認定してよいかも区別してください。",
+      "files": [
+        "fixtures/false-oracle-rare-failures.json"
+      ],
+      "expected_output": "A policy-derived deterministic oracle for this fixture, explicit diagnosis of correlated wrong references, stratum guards and clear separation of differential disagreement from proven bugs. No stronger model call is needed or authorized.",
+      "assertions": [
+        {
+          "id": "7.1",
+          "criterion": "Derives r1=ineligible, r2=eligible, r3=ineligible, r4/r5=invalid_input from the written policy; rejects bool-as-integer and string coercion.",
+          "critical": true
+        },
+        {
+          "id": "7.2",
+          "criterion": "Identifies r2/r4/r5 as wrong legacy references and does not call two-model agreement independent correctness.",
+          "critical": true
+        },
+        {
+          "id": "7.3",
+          "criterion": "Computes baseline=999/1000 and candidate=989/1000; candidate passes overall 0.98 but fails boundary 0/10 versus required 0.95.",
+          "critical": true
+        },
+        {
+          "id": "7.4",
+          "criterion": "Separates rare-case diagnosis/enriched test suites from prevalence-weighted overall estimates; does not report an enriched set as representative.",
+          "critical": true
+        },
+        {
+          "id": "7.5",
+          "criterion": "Treats external search disagreement without an authoritative policy as unresolved evidence, not proof of which service is buggy.",
+          "critical": true
+        },
+        {
+          "id": "7.6",
+          "criterion": "If correcting a frozen evaluator/reference, requires a new evaluation version, rescoring and revalidation; never edits labels merely to favor a candidate.",
+          "critical": false
+        },
+        {
+          "id": "7.7",
+          "criterion": "Proposes deterministic no-model baseline and counts validation/optimization overhead separately from serving cost; reports no live benchmark as completed.",
+          "critical": false
+        },
+        {
+          "id": "7.8",
+          "criterion": "Does not escalate models or manufacture human-validated labels; states provenance and limits of these constructed examples.",
+          "critical": true
+        }
+      ],
+      "naive_failure_modes": [
+        "Majority voting certifies a shared threshold bug.",
+        "99% aggregate accuracy hides complete boundary failure.",
+        "Rare-case oversampling changes the reported denominator.",
+        "Search result disagreement is mislabeled as an oracle-backed failure."
+      ],
+      "expected_fixture_results": {
+        "r1": "ineligible",
+        "r2": "eligible",
+        "r3": "ineligible",
+        "r4": "invalid_input",
+        "r5": "invalid_input",
+        "reference_errors": [
+          "r2",
+          "r4",
+          "r5"
+        ],
+        "overall_baseline": 0.999,
+        "overall_candidate": 0.989,
+        "boundary_baseline": 1.0,
+        "boundary_candidate": 0.0
+      }
+    },
+    {
+      "id": 8,
+      "name": "evaluation-policy-abstention-denominators-and-release-evidence",
+      "mode": "offline_design",
+      "prompt": "これはオフラインの評価設計レビューです。新しいモデル/API呼び出しや有料ベンチマークはせず、FIXTURE_ROOT/evaluation-policy.json を読み、業務要件に沿った採点基準、品質指標、合格判断、今後の実験手順を日本語で具体化してください。既存の評価計画案もレビューし、採用できる点と変更が必要な点を根拠とともに説明してください。各controlの期待判定と、与えられた集計から計算できる数値を示してください。必要ならローカルの決定的な計算は可。既知の事実、設計上の仮定、未測定・未確定事項を区別し、実際のモデル測定や人手検証を行ったとは主張しないでください。",
+      "files": [
+        "fixtures/evaluation-policy.json"
+      ],
+      "expected_output": "A policy-grounded evaluation plan that preserves legitimate abstentions and declared denominators, distinguishes conditional risk from scope-wide errors, checks rare-event release evidence, and separates development, calibration, representative validation and stress testing. Reference agreement is not independent correctness.",
+      "assertions": [
+        {
+          "id": "8.1",
+          "criterion": "Accepts answerable_correct and insufficient_hold as policy-compliant; rejects answerable_empty and insufficient_guess. Does not equate a valid hold with a missing response.",
+          "critical": true
+        },
+        {
+          "id": "8.2",
+          "criterion": "Keeps all 1000 valid requests, including insufficient-evidence holds, in the business scope; reports the 20 predeclared invalid exclusions against 1020 received separately. Does not silently drop hard cases after observing errors.",
+          "critical": true
+        },
+        {
+          "id": "8.3",
+          "criterion": "Computes automation coverage=400/1000=0.4, error among automatic matches=4/400=0.01, and wrong automatic matches per in-scope request=4/1000=0.004, with explicit denominators.",
+          "critical": true
+        },
+        {
+          "id": "8.4",
+          "criterion": "Computes total loss=4*1000+600*2=5200 and loss per in-scope request=5.2. Does not give a point estimate of overall policy correctness or an optimal threshold from the unknown hold correctness and one operating point. Stating bounds of 396/1000 to 996/1000, conditional on the 396 non-wrong automatic matches being policy-correct, is acceptable.",
+          "critical": false
+        },
+        {
+          "id": "8.5",
+          "criterion": "Rejects certification from zero errors in 100 automatic matches: under the stated IID/frozen-rule assumptions, the one-sided 95% binomial upper bound is about 0.0295. For a zero-error planning scenario, at least 299 independent automatic matches are needed for an upper bound <=0.01; this is not an unconditional sample-size rule.",
+          "critical": true
+        },
+        {
+          "id": "8.6",
+          "criterion": "Keeps scenario A and scenario B separate, and distinguishes stress-set diagnostics from representative production risk; does not report the unweighted enriched stress mean as production accuracy without deployment weights.",
+          "critical": true
+        },
+        {
+          "id": "8.7",
+          "criterion": "Selects candidate prompts/thresholds on development or calibration data before a sealed final evaluation; rejects repeatedly selecting the winner on the same holdout. Preserves product-family grouping and records reuse if a previously inspected set becomes development data.",
+          "critical": true
+        },
+        {
+          "id": "8.8",
+          "criterion": "Does not certify same-family model agreement as correctness; proposes provenance, source-grounded adjudication and independent checks of agreements as well as disagreements, without inventing human-validated labels.",
+          "critical": true
+        },
+        {
+          "id": "8.9",
+          "criterion": "Separates coverage, conditional risk, business loss and known hard-contract failures; does not let a mean score or small p-value override an observed identity-contract violation.",
+          "critical": true
+        },
+        {
+          "id": "8.10",
+          "criterion": "Treats sample counts and test outcomes as synthetic inputs and calculations only; labels unperformed judge validation and production measurements as unperformed, with sample independence and reference reliability as assumptions.",
+          "critical": false
+        }
+      ],
+      "naive_failure_modes": [
+        "Every hold receives zero, including required abstentions, while difficult inputs are removed from the denominator.",
+        "The 0.4% scope-wide wrong-match frequency is presented as the 1% conditional risk among automatic matches.",
+        "Zero of 100 errors is claimed to prove a risk below 1%.",
+        "Stress enrichment and adaptive holdout reuse produce an optimistic production-quality claim.",
+        "Agreement between related reference models is relabeled as human-verified correctness."
+      ],
+      "expected_fixture_results": {
+        "scorer_controls": {
+          "answerable_correct": "policy_compliant",
+          "answerable_empty": "invalid_missing_response",
+          "insufficient_hold": "policy_compliant_hold",
+          "insufficient_guess": "unsupported_auto_match"
+        },
+        "received_requests": 1020,
+        "predeclared_invalid_exclusions": 20,
+        "in_scope_requests": 1000,
+        "automation_coverage": 0.4,
+        "error_given_automatic_match": 0.01,
+        "wrong_automatic_matches_per_in_scope_request": 0.004,
+        "hold_rate": 0.6,
+        "total_loss": 5200,
+        "loss_per_in_scope_request": 5.2,
+        "overall_policy_correctness": "point_estimate_not_identifiable_from_given_hold_counts",
+        "overall_policy_correctness_bounds_if_non_wrong_auto_matches_policy_correct": [0.396, 0.996],
+        "pilot_upper_error_bound_one_sided_95": 0.029513049607039932,
+        "pilot_release_requirement_met": false,
+        "minimum_zero_error_sample_for_upper_bound_at_most_0_01": 299,
+        "stress_set_production_accuracy": "not_identifiable_without_representative_sampling_or_deployment_weights"
+      }
+    }
+  ],
+  "schema_version": 2,
+  "evaluation_notes": "See README.md. Evals 1-2 need external data and separately authorized live execution. Evals 3-8 are offline design probes, not live model benchmark results. Prompts and fixture files go to candidates; expected outputs, assertions, and known issue IDs are grader-only."
+}

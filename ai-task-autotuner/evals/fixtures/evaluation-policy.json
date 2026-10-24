@@ -1,0 +1,74 @@
+{
+  "synthetic": true,
+  "scope": "Design an evaluation and release decision for an SKU matching service. All counts below are constructed examples, not live model measurements.",
+  "business_policy": {
+    "in_scope": "All valid requests for the supported product family, including requests with insufficient matching evidence, remain in scope.",
+    "valid_outcomes": "auto_match with a real target ID, or hold with a reason. A valid request lacking a required distinguishing attribute must be held. An empty response is never a valid hold.",
+    "hold_correctness": "For this synthetic task, full policy correctness requires auto_match when complete evidence satisfies the matching rule for exactly one target. A hold is policy-correct when required evidence is insufficient or no unique match can be established. A syntactically valid hold can therefore still be an avoidable, policy-incorrect hold; its operational cost is counted either way.",
+    "matching_rule": "An automatic match requires an exact canonical product code, color and pack_count match to exactly one existing target. An absent color is valid input but insufficient evidence for automatic matching.",
+    "invalid_input": "Non-JSON input and duplicate request IDs are outside this batch's agreed input contract. They are counted and reported as predeclared exclusions, not silently dropped after seeing model results.",
+    "loss_units": {"wrong_auto_match": 1000, "hold": 2, "correct_auto_match": 0},
+    "release_requirement": "For the frozen deployment rule, the error probability among automatic matches must be at most 0.01 with a one-sided 95% confidence bound. Coverage and expected loss must be reported separately. A higher mean score cannot waive a known identity-contract violation."
+  },
+  "scorer_controls": [
+    {
+      "id": "answerable_correct",
+      "request": {"id": "q1", "product_code": "TEE17", "color": "blue", "pack_count": 1},
+      "targets": [{"id": "t1", "product_code": "TEE17", "color": "blue", "pack_count": 1}],
+      "response": {"status": "auto_match", "target_id": "t1"}
+    },
+    {
+      "id": "answerable_empty",
+      "request": {"id": "q2", "product_code": "TEE17", "color": "blue", "pack_count": 1},
+      "targets": [{"id": "t1", "product_code": "TEE17", "color": "blue", "pack_count": 1}],
+      "response": null
+    },
+    {
+      "id": "insufficient_hold",
+      "request": {"id": "q3", "product_code": "TEE17", "color": null, "pack_count": 1},
+      "targets": [
+        {"id": "t1", "product_code": "TEE17", "color": "blue", "pack_count": 1},
+        {"id": "t2", "product_code": "TEE17", "color": "red", "pack_count": 1}
+      ],
+      "response": {"status": "hold", "reason": "missing_color"}
+    },
+    {
+      "id": "insufficient_guess",
+      "request": {"id": "q4", "product_code": "TEE17", "color": null, "pack_count": 1},
+      "targets": [
+        {"id": "t1", "product_code": "TEE17", "color": "blue", "pack_count": 1},
+        {"id": "t2", "product_code": "TEE17", "color": "red", "pack_count": 1}
+      ],
+      "response": {"status": "auto_match", "target_id": "t1"}
+    }
+  ],
+  "scenario_a_accounting": {
+    "description": "A complete synthetic replay with adjudicated outcome counts. This is separate from the pilot in scenario B.",
+    "received_requests": 1020,
+    "predeclared_invalid_exclusions": 20,
+    "in_scope_requests": 1000,
+    "automatic_matches": 400,
+    "wrong_automatic_matches": 4,
+    "holds": 600,
+    "hold_policy_correctness": "Not provided; the aggregate hold count alone does not distinguish justified holds from avoidable holds."
+  },
+  "scenario_b_release_pilot": {
+    "description": "A different, independently sampled pilot; do not pool it with scenario A.",
+    "sampled_automatic_matches": 100,
+    "verified_wrong_matches": 0,
+    "sampling_assumptions": "For this planning exercise, these are IID representative automatic matches under a rule frozen before sampling, with trusted error labels. Production validation must check those assumptions.",
+    "team_claim": "Zero observed errors establishes compliance with the release requirement."
+  },
+  "stress_set": {
+    "description": "Cases were deliberately collected to exercise difficult interactions. Deployment stratum weights are not available.",
+    "ordinary_cases": 50,
+    "boundary_or_conflicting_cases": 50,
+    "team_claim": "The unweighted mean of this set is the service's production accuracy."
+  },
+  "draft_evaluation_plan": {
+    "reference": "Run two prompts on the same model family and accept agreement as an independently correct label; inspect only disagreements.",
+    "scorer": "Assign zero to every hold or empty response, and remove information-insufficient requests from the quality denominator.",
+    "selection": "Change the confidence threshold after every candidate, evaluate on the same holdout, and keep whichever threshold has the best holdout result.",
+    "available_partition_groups": "Source product families can be used to keep related requests together when splitting data."
+  }
+}

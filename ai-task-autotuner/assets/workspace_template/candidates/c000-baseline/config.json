@@ -1,0 +1,7 @@
+{
+  "effort": "low",
+  "thinking": "off",
+  "max_tokens": 16000,
+  "concurrency": 6,
+  "params": {}
+}

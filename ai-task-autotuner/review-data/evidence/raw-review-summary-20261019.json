@@ -1,0 +1,433 @@
+{
+  "source_integrity": {
+    "captured_source_verifier_passed": true,
+    "product_pairs": 152,
+    "rakuten_rows": 1934,
+    "au_rows": 1600,
+    "candidate_pairs": 45454,
+    "source_blobs_verified": 298
+  },
+  "archive_integrity": [
+    {
+      "archive": "/workspace/attachments/1ac0cd5f-78c5-4a5b-b7a3-fbd2daf9a272/ai-task-autotuner-testdata-20261019.zip",
+      "sha256": "8f3841f7ca1c6b6cb0e415151344d10dc3ad13ec15bdfb9b04fa49a896e83609",
+      "files": 795,
+      "changed_originals": []
+    },
+    {
+      "archive": "/workspace/scratch/ai-task-autotuner-testdata-20261019/inputs/sku-product-volume-normal-v1.zip",
+      "sha256": "d3c2ddcd86da0d110dd51f37f18eb4a27143a1bde7ee3d08c8b5c95e5a2462f2",
+      "files": 538,
+      "changed_originals": []
+    }
+  ],
+  "task1": {
+    "raw_snapshot": {
+      "valid_runs": 24,
+      "void_runs": 3,
+      "last_valid_run_ended": "2026-10-18T16:23:49+0000",
+      "last_ledger_event": "E006 discard at 2026-10-18T16:20:38+0000",
+      "candidate_dirs": [
+        "c000-baseline",
+        "c001-rules",
+        "c002-spec-rules",
+        "c003-option-scope",
+        "c004-effort-medium",
+        "c005-cond-anchor",
+        "p001-sonnet-probe",
+        "ref-opus",
+        "ref-opus-v2"
+      ],
+      "final_c012_run_present": false,
+      "E013_run_present": false,
+      "final_report_present": false,
+      "final_deliverables_present": false,
+      "raw_eval_hash": "65ac634e45418016",
+      "reviewer_packet_eval_hash": "fd3da7a9b3f3ab8e",
+      "raw_reference_files_rows": {
+        "dev.jsonl": 585,
+        "dev.adjudicated.jsonl": 90,
+        "dev.disagreements.jsonl": 57,
+        "holdout.jsonl": 544
+      },
+      "reference_snapshot_difference": "Reviewer packet v3 adds acceptable {matched, conditional} on raw-2fc336c20bf4ad86 (10 rows); holdout reference stated untouched. Raw archive remains v2.",
+      "search_scope": "All paths and metadata in archive, including deliverables, without_skill, runs_void. Literal c012 token occurs in source product identifiers, not final candidate/run records."
+    },
+    "deterministic_rule": {
+      "pairs": 78,
+      "rows": 561,
+      "reference_rows": 336,
+      "mismatches": 0,
+      "permuted_pairs": 36,
+      "by_split": {
+        "dev": {
+          "pairs": 28,
+          "rows": 222,
+          "reference_rows": 222
+        },
+        "holdout": {
+          "pairs": 18,
+          "rows": 114,
+          "reference_rows": 114
+        },
+        "rest": {
+          "pairs": 32,
+          "rows": 225,
+          "reference_rows": 0
+        }
+      },
+      "all_reference_rows": {
+        "dev": 585,
+        "holdout": 544
+      }
+    },
+    "final_holdout_and_full_not_recomputable_from_this_archive": true
+  },
+  "task2": {
+    "query_rebuild_matches_exported": true,
+    "recomputed_scores_match_stored": true,
+    "holdout": {
+      "c000-baseline": {
+        "path": "/workspace/scratch/ai-task-autotuner-testdata-20261019/iteration-1/eval-2-au-to-rakuten-product-identification/with_skill/outputs/ws/runs/E001__holdout__holdout__20261018-161619886",
+        "n": 142,
+        "correct": 129,
+        "accuracy": 0.9084507042253521,
+        "false_accepts": 9,
+        "false_accept_rate": 0.06338028169014084,
+        "failed": 1,
+        "excluded": [
+          {
+            "id": "raw-7fa1c1f5f6ac2ec6|present",
+            "unit": "raw-7fa1c1f5f6ac2ec6|present",
+            "score": 0,
+            "pred": "none",
+            "ref": "C5"
+          },
+          {
+            "id": "raw-7fa1c1f5f6ac2ec6|removed",
+            "unit": "raw-7fa1c1f5f6ac2ec6|removed",
+            "score": 1,
+            "pred": "none",
+            "ref": "none"
+          },
+          {
+            "id": "raw-affeea04e64fe893|present",
+            "unit": "raw-affeea04e64fe893|present",
+            "score": 0,
+            "pred": "none",
+            "ref": "C7"
+          },
+          {
+            "id": "raw-affeea04e64fe893|removed",
+            "unit": "raw-affeea04e64fe893|removed",
+            "score": 1,
+            "pred": "none",
+            "ref": "none"
+          },
+          {
+            "id": "raw-7f04455a83ac52c8|present",
+            "unit": "raw-7f04455a83ac52c8|present",
+            "score": 0,
+            "pred": "C3",
+            "ref": "C4"
+          },
+          {
+            "id": "raw-7f04455a83ac52c8|removed",
+            "unit": "raw-7f04455a83ac52c8|removed",
+            "score": 1,
+            "pred": "none",
+            "ref": "none"
+          }
+        ]
+      },
+      "c006-top4-shortdesc": {
+        "path": "/workspace/scratch/ai-task-autotuner-testdata-20261019/iteration-1/eval-2-au-to-rakuten-product-identification/with_skill/outputs/ws/runs/E007__holdout__holdout__20261018-161737782",
+        "n": 142,
+        "correct": 136,
+        "accuracy": 0.9577464788732394,
+        "false_accepts": 4,
+        "false_accept_rate": 0.028169014084507043,
+        "failed": 0,
+        "excluded": [
+          {
+            "id": "raw-7fa1c1f5f6ac2ec6|present",
+            "unit": "raw-7fa1c1f5f6ac2ec6|present",
+            "score": 0,
+            "pred": "none",
+            "ref": "C5"
+          },
+          {
+            "id": "raw-7fa1c1f5f6ac2ec6|removed",
+            "unit": "raw-7fa1c1f5f6ac2ec6|removed",
+            "score": 1,
+            "pred": "none",
+            "ref": "none"
+          },
+          {
+            "id": "raw-affeea04e64fe893|present",
+            "unit": "raw-affeea04e64fe893|present",
+            "score": 0,
+            "pred": "none",
+            "ref": "C7"
+          },
+          {
+            "id": "raw-affeea04e64fe893|removed",
+            "unit": "raw-affeea04e64fe893|removed",
+            "score": 1,
+            "pred": "none",
+            "ref": "none"
+          },
+          {
+            "id": "raw-7f04455a83ac52c8|present",
+            "unit": "raw-7f04455a83ac52c8|present",
+            "score": 0,
+            "pred": "none",
+            "ref": "C4"
+          },
+          {
+            "id": "raw-7f04455a83ac52c8|removed",
+            "unit": "raw-7f04455a83ac52c8|removed",
+            "score": 1,
+            "pred": "none",
+            "ref": "none"
+          }
+        ]
+      },
+      "c007-no-desc": {
+        "path": "/workspace/scratch/ai-task-autotuner-testdata-20261019/iteration-1/eval-2-au-to-rakuten-product-identification/with_skill/outputs/ws/runs/E008__holdout__holdout__20261018-161500499",
+        "n": 142,
+        "correct": 135,
+        "accuracy": 0.9507042253521126,
+        "false_accepts": 4,
+        "false_accept_rate": 0.028169014084507043,
+        "failed": 0,
+        "excluded": [
+          {
+            "id": "raw-7fa1c1f5f6ac2ec6|present",
+            "unit": "raw-7fa1c1f5f6ac2ec6|present",
+            "score": 0,
+            "pred": "none",
+            "ref": "C5"
+          },
+          {
+            "id": "raw-7fa1c1f5f6ac2ec6|removed",
+            "unit": "raw-7fa1c1f5f6ac2ec6|removed",
+            "score": 1,
+            "pred": "none",
+            "ref": "none"
+          },
+          {
+            "id": "raw-affeea04e64fe893|present",
+            "unit": "raw-affeea04e64fe893|present",
+            "score": 0,
+            "pred": "none",
+            "ref": "C7"
+          },
+          {
+            "id": "raw-affeea04e64fe893|removed",
+            "unit": "raw-affeea04e64fe893|removed",
+            "score": 1,
+            "pred": "none",
+            "ref": "none"
+          },
+          {
+            "id": "raw-7f04455a83ac52c8|present",
+            "unit": "raw-7f04455a83ac52c8|present",
+            "score": 0,
+            "pred": "none",
+            "ref": "C4"
+          },
+          {
+            "id": "raw-7f04455a83ac52c8|removed",
+            "unit": "raw-7f04455a83ac52c8|removed",
+            "score": 1,
+            "pred": "none",
+            "ref": "none"
+          }
+        ]
+      }
+    },
+    "bootstrap_method": {
+      "method": "Percentile paired cluster bootstrap, micro-average ratio, clusters sampled with replacement at fixed cluster count",
+      "repetitions": 200000,
+      "numpy_generator": "default_rng",
+      "seed": 20261019
+    },
+    "holdout_family_delta_ci": [
+      -0.007142857142857143,
+      0.09090909090909091
+    ],
+    "holdout_question_delta_ci": [
+      0.0,
+      0.08450704225352113
+    ],
+    "holdout_directly_close_read_scored_pairs": 11,
+    "deterministic_rule": {
+      "total_queries": 304,
+      "decided": 55,
+      "mismatches": [],
+      "excluded_decided": [],
+      "by_split": {
+        "dev": {
+          "queries": 28
+        },
+        "holdout": {
+          "queries": 27
+        },
+        "rest": {
+          "queries": 0
+        }
+      },
+      "missed_by_top4": []
+    }
+  },
+  "actual_personalization_metadata_loss": {
+    "explicit_personalization_examples": [
+      {
+        "pair": "raw-2fc336c20bf4ad86",
+        "products_jsonl_line": 33,
+        "split": "dev",
+        "rows": 10,
+        "reference_rows": 10,
+        "titles": {
+          "rakuten": "[redacted: marketplace product title]",
+          "au": "[redacted: marketplace product title]"
+        },
+        "observed_option_quote": "■イニシャル刺繍",
+        "all_observed_options": [
+          "■イニシャル刺繍"
+        ],
+        "current_selected_values": null,
+        "output_extra_options": [],
+        "output_unresolved_conditions": []
+      },
+      {
+        "pair": "raw-4e401d32a52ad330",
+        "products_jsonl_line": 46,
+        "split": "rest",
+        "rows": 20,
+        "reference_rows": 0,
+        "titles": {
+          "rakuten": "[redacted: marketplace product title]",
+          "au": "[redacted: marketplace product title]"
+        },
+        "observed_option_quote": "■イニシャル選択",
+        "all_observed_options": [
+          "■イニシャル選択"
+        ],
+        "current_selected_values": null,
+        "output_extra_options": [],
+        "output_unresolved_conditions": []
+      },
+      {
+        "pair": "raw-7a959106e36027f2",
+        "products_jsonl_line": 77,
+        "split": "rest",
+        "rows": 3,
+        "reference_rows": 0,
+        "titles": {
+          "rakuten": "[redacted: marketplace product title]",
+          "au": "[redacted: marketplace product title]"
+        },
+        "observed_option_quote": "1行目の刻印内容をご入力下さい。（刻印可能文字数：英数字なら13文字、日本語・記号は5文字）",
+        "all_observed_options": [
+          "●メール便（ポスト投函）でのお届けです。",
+          "1行目の刻印内容をご入力下さい。（刻印可能文字数：英数字なら13文字、日本語・記号は5文字）",
+          "2行目の刻印内容をご入力下さい。（刻印可能文字数：英数字なら13文字、日本語・記号は5文字）"
+        ],
+        "current_selected_values": null,
+        "output_extra_options": [],
+        "output_unresolved_conditions": []
+      },
+      {
+        "pair": "raw-85500c8c79045555",
+        "products_jsonl_line": 86,
+        "split": "rest",
+        "rows": 3,
+        "reference_rows": 0,
+        "titles": {
+          "rakuten": "[redacted: marketplace product title]",
+          "au": "[redacted: marketplace product title]"
+        },
+        "observed_option_quote": "フォントを下記からお選び下さい",
+        "all_observed_options": [
+          "●メール便（ポスト投函）でのお届けです。",
+          "フォントを下記からお選び下さい",
+          "1行目の刻印内容をご入力下さい。（刻印可能文字数：英数字なら10文字、漢字かな・マークは6文字）",
+          "2行目の刻印内容をご入力下さい。（刻印可能文字数：英数字なら10文字、漢字かな・マークは6文字）",
+          "刻印は片面のみです。両面刻印は対応出来ません。"
+        ],
+        "current_selected_values": null,
+        "output_extra_options": [],
+        "output_unresolved_conditions": []
+      },
+      {
+        "pair": "raw-bb3db28ec31a79b6",
+        "products_jsonl_line": 118,
+        "split": "holdout",
+        "rows": 14,
+        "reference_rows": 14,
+        "titles": {
+          "rakuten": "[redacted: marketplace product title]",
+          "au": "[redacted: marketplace product title]"
+        },
+        "observed_option_quote": "■イニシャル選択",
+        "all_observed_options": [
+          "■イニシャル選択"
+        ],
+        "current_selected_values": null,
+        "output_extra_options": [],
+        "output_unresolved_conditions": []
+      }
+    ],
+    "explicit_personalization_example_pairs": 5,
+    "explicit_personalization_example_rows": 50,
+    "meaning": "All explicit examples are accepted by exact_pair with no additional/unresolved conditions, despite customization prompts and null selection state. This demonstrates discarded purchase-condition information, not a human-verified wrong SKU row. This does not assert all free options are required."
+  },
+  "other_output_checks": {
+    "scope": "Stored calls only, no LLM invocation. Task 1 c000-c005/E001-E006 snapshot; no c012 logs. Task 2 final c007 available.",
+    "task1_measured_calls": 500,
+    "task1_measured_rows": 6420,
+    "task1_duplicate_r": 0,
+    "task1_bad_x_u_e_types": 0,
+    "task1_definite_oob_evidence": [
+      {
+        "candidate": "c005-cond-anchor",
+        "run": "E006__dev__experiment__r2__20261018-161845258",
+        "unit": "raw-ef29c76517a4b100",
+        "r": "R0",
+        "ref": "rd1",
+        "input_rakuten_description_line_count": 0,
+        "output_status": "ok",
+        "score": 1.0,
+        "gate_failures": [],
+        "output_path": "/workspace/scratch/ai-task-autotuner-testdata-20261019/iteration-1/eval-1-sku-matching-no-labels/with_skill/outputs/ws/runs/E006__dev__experiment__r2__20261018-161845258/outputs.jsonl",
+        "output_line": 23
+      }
+    ],
+    "task1_conditional_rows_by_candidate": {
+      "c000-baseline": 57,
+      "c002-spec-rules": 153,
+      "c003-option-scope": 87,
+      "c004-effort-medium": 178,
+      "c005-cond-anchor": 96
+    },
+    "task1_conditional_missing_options_reason_or_row_evidence": 0,
+    "task1_early_baseline_state_caveat": "c000 prompt accepts arbitrary state; 102 conditional options had freeform state. Later c002-c005 options all use include/exclude. Do not label c000 as violation of final c012 prompt.",
+    "task2_final_c007_choice_seen": 754,
+    "task2_final_c007_nonstring_choices": 0,
+    "task2_final_c007_choice_by_purpose": {
+      "confirm": 128,
+      "experiment": 256,
+      "holdout": 121,
+      "full": 249
+    }
+  },
+  "limitations": [
+    "References remain unverified by a human.",
+    "Bootstrap intervals resample stored outputs and product families; they do not measure repeated-model inference variation.",
+    "Task1 final c012 inference logs and eval v3 are absent."
+  ],
+  "new_model_calls": 0,
+  "code_changes": []
+}

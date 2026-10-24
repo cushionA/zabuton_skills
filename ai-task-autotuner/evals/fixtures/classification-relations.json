@@ -1,0 +1,45 @@
+{
+  "synthetic": true,
+  "task_contract": {
+    "domain": "Software operations tickets only; medical or unrelated business requests are unknown.",
+    "labels": {
+      "urgent": "An active production outage is asserted to affect end users.",
+      "routine": "An in-domain ticket does not assert such an outage, including explicit denial or planned tests.",
+      "unknown": "Out of domain or insufficient information to decide."
+    },
+    "quoted_text": "A quoted old message does not override the author's explicit current status.",
+    "conditions": "Evaluate the short texts as written. Do not infer status from ticket IDs. All supplied texts fit within the context budget.",
+    "output": "One label per ticket ID."
+  },
+  "tickets": [
+    {
+      "id": "c1",
+      "text": "Production is down now and all end users cannot log in."
+    },
+    {
+      "id": "c2",
+      "text": "Production is down now and all end users cannot log in. Internal ticket number: 314."
+    },
+    {
+      "id": "c3",
+      "text": "Production is not down now; all end users can log in. This is a planned failover test."
+    },
+    {
+      "id": "c4",
+      "text": "An old message said \"production is not down\". Current status: production is down now and all end users cannot log in."
+    },
+    {
+      "id": "c5",
+      "text": "Please triage a patient with chest pain."
+    },
+    {
+      "id": "c6",
+      "text": "Someone mentioned a possible problem. No system, impact, or current status is available."
+    }
+  ],
+  "proposed_shortcuts": [
+    "Every insertion of the word not must flip the label.",
+    "Appending any text must leave a label unchanged.",
+    "Every ticket must be forced into urgent or routine."
+  ]
+}

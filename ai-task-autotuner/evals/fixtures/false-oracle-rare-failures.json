@@ -1,0 +1,66 @@
+{
+  "synthetic": true,
+  "task_contract": {
+    "goal": "Eligibility decision using the explicit policy below; do not replace it with the previous models' majority vote.",
+    "age": "Must be a JSON integer >= 0; booleans and strings are invalid, with no coercion.",
+    "verified": "Must be a JSON boolean.",
+    "decision": "For valid inputs, eligible iff age >= 18 and verified is true; otherwise ineligible. Invalid inputs return invalid_input.",
+    "quality_contract": "Overall correctness >= 0.98 and boundary-stratum correctness >= 0.95. Both requirements apply.",
+    "reference_status": "The two legacy model outputs below are unverified, correlated references, not ground truth."
+  },
+  "records": [
+    {
+      "id": "r1",
+      "age": 17,
+      "verified": true,
+      "reference_a": "ineligible",
+      "reference_b": "ineligible"
+    },
+    {
+      "id": "r2",
+      "age": 18,
+      "verified": true,
+      "reference_a": "ineligible",
+      "reference_b": "ineligible"
+    },
+    {
+      "id": "r3",
+      "age": 18,
+      "verified": false,
+      "reference_a": "ineligible",
+      "reference_b": "ineligible"
+    },
+    {
+      "id": "r4",
+      "age": "18",
+      "verified": true,
+      "reference_a": "eligible",
+      "reference_b": "eligible"
+    },
+    {
+      "id": "r5",
+      "age": true,
+      "verified": true,
+      "reference_a": "ineligible",
+      "reference_b": "ineligible"
+    }
+  ],
+  "synthetic_summary": {
+    "provenance": "Constructed arithmetic example of counts adjudicated against the explicit policy, not a real model benchmark.",
+    "strata": [
+      {
+        "id": "ordinary",
+        "n": 990,
+        "baseline_correct": 989,
+        "candidate_correct": 989
+      },
+      {
+        "id": "boundary",
+        "n": 10,
+        "baseline_correct": 10,
+        "candidate_correct": 0
+      }
+    ]
+  },
+  "open_question": "An external search service disagrees with a second search service about an undocumented policy. No authoritative policy or trusted labels are available for that separate question."
+}

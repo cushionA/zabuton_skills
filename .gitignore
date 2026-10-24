@@ -30,6 +30,11 @@ __pycache__/
 .venv/
 venv/
 
+# Astra引き継ぎ用のレビュー資料ZIPは追跡し、ローカル展開した重複データは追跡しない。
+ai-task-autotuner/review-data/unpacked/
+# 試験データZIPは実商品データと全呼び出しログを含み「公開しない」原本なので追跡しない。
+ai-task-autotuner/review-data/ai-task-autotuner-testdata-*.zip
+
 # OS
 Thumbs.db
 desktop.ini
