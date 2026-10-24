@@ -198,6 +198,14 @@ def _cli_attempt(prompt, system, model, effort, json_schema, timeout, extra_args
     return rec
 
 
+def api_thinking_off(model, effort):
+    """The api request body that turns thinking off, or None where the model rejects it."""
+    model_id = MODEL_ALIASES.get(model, model)
+    if model_id in API_THINKING_OFF and effort not in ("xhigh", "max"):
+        return API_THINKING_OFF[model_id]
+    return None
+
+
 def _api_attempt(prompt, system, model, effort, json_schema, timeout, max_tokens, cache_system, thinking):
     try:
         import anthropic  # official SDK; only needed for the api backend
@@ -211,8 +219,8 @@ def _api_attempt(prompt, system, model, effort, json_schema, timeout, max_tokens
     model_id = MODEL_ALIASES.get(model, model)
     kwargs = {"model": model_id, "max_tokens": max_tokens or 16000,
               "system": [block], "messages": [{"role": "user", "content": prompt}]}
-    if thinking == "off" and model_id in API_THINKING_OFF and effort not in ("xhigh", "max"):
-        kwargs["thinking"] = API_THINKING_OFF[model_id]
+    if thinking == "off" and api_thinking_off(model_id, effort) is not None:
+        kwargs["thinking"] = api_thinking_off(model_id, effort)
     oc = {}
     if effort:
         oc["effort"] = effort
@@ -354,6 +362,9 @@ def call(prompt, system=None, *, backend="auto", model=None, effort=None, max_to
     if backend in ("codex", "claude"):
         out["unsupported_settings"] = [k for k, value in (("max_tokens", max_tokens), ("thinking", thinking))
                                        if value is not None]
+    elif backend == "api":
+        # e.g. Opus 5.5 rejects disabled thinking: the request runs with the model's default.
+        out["unsupported_settings"] = ["thinking"] if thinking == "off" and api_thinking_off(model, effort) is None else []
     if out["ok"] and out["stop_reason"] == "max_tokens":
         out["error_kind"] = "truncated"
     if expect_json:

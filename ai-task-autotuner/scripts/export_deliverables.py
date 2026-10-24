@@ -28,13 +28,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import MODEL_ALIASES, append_jsonl, now_iso, percentile, read_json, read_jsonl, write_json  # noqa: E402
+from common import append_jsonl, now_iso, percentile, read_json, read_jsonl, write_json  # noqa: E402
 from workspace import candidate_hash, data_fingerprint, eval_hash, list_runs  # noqa: E402
 from quality_gate import gate_allows_runs  # noqa: E402
 from task_review import task_review_allows_runs  # noqa: E402
 from relocate_workspace import relocate  # noqa: E402
 from ledger import KEEPS, _state as ledger_state  # noqa: E402
-from llm_call import API_THINKING_OFF  # noqa: E402
+from llm_call import api_thinking_off  # noqa: E402
 
 
 def _round_up(x, step):
@@ -88,8 +88,7 @@ def recommend(ws, candidate, run_dirs):
             elif call.get("backend") != "api" or not model or effort is None:
                 off_controls.append(None)
             else:
-                off_controls.append(MODEL_ALIASES.get(model, model) in API_THINKING_OFF
-                                    and effort not in ("xhigh", "max"))
+                off_controls.append(api_thinking_off(model, effort) is not None)
         if any(t > 0 for t in thinking):
             S["thinking"]["value"] = "unverified"
             S["thinking"]["why"] = "thinking tokens were reported despite the off request; investigate before claiming off"

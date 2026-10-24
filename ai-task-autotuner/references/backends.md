@@ -31,7 +31,8 @@ workspaces. Explicit candidate effort is preserved. Unsupported levels are not s
 at a higher setting or on a different model. A justified initial exception or later increase
 belongs in the experiment plan; see [task-design.md](task-design.md#thinking-and-output-budget).
 `thinking` and `thinking_requested` in call records describe the request, not observed absence
-of reasoning. CLI `unsupported_settings` records controls the adapter does not enforce.
+of reasoning. `unsupported_settings` records controls the adapter does not enforce (CLI:
+`max_tokens` and `thinking`; API: a `thinking: "off"` request the model rejects).
 Both CLI exports show thinking as `backend managed` and preserve the requested setting separately.
 API exports also disclose off requests that the adapter does not apply, using per-call model,
 backend and effort overrides; observed positive thinking usage prevents an off claim.
@@ -148,8 +149,10 @@ to `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5`. `effort` goes to
 `output_config.effort`; a JSON schema to `output_config.format`; the system prompt carries
 `cache_control`. `thinking: "off"` (the default) sends `{"type": "disabled"}` for Haiku 5.5 and
 `{"type": "between_tools"}` for Sonnet 5.5 (both only at effort high or below); Opus 5.5 cannot
-disable thinking - lower the effort instead. Usage comes from `response.usage` (thinking tokens when reported); cost is a
-list-price estimate (`common.PRICES`; Haiku 5.5 is priced higher past 100K input tokens). For large
+disable thinking - lower the effort instead; such calls list `thinking` in
+`unsupported_settings`. Usage comes from `response.usage` (thinking tokens when reported); cost is a
+list-price estimate (`common.PRICES`; Haiku 5.5 is priced higher past 100K input tokens;
+cache reads use the published price, e.g. $0.20/MTok for Opus 5.5, else 0.1x input). For large
 final runs the Batches API halves cost but is not wired in here.
 
 The api backend was not exercised live when this skill was written (no key in that

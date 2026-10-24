@@ -2,6 +2,7 @@
 import json
 import subprocess
 import sys
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -96,6 +97,36 @@ class LlmCallTest(unittest.TestCase):
             self.assertEqual(record["unsupported_settings"], ["max_tokens", "thinking"])
             self.assertEqual(record["usage"]["thinking"], 5)
 
+    def test_api_off_request_that_the_model_rejects_is_recorded_as_unsupported(self):
+        answer = {"ok": True, "text": "ok", "cost_usd": 0, "usage": {"input": 1, "output": 7}}
+        for model, effort, expected in (("opus", "low", ["thinking"]), ("haiku", "low", []),
+                                        ("haiku", "max", ["thinking"]), ("claude-sonnet-5-5", "high", [])):
+            with self.subTest(model=model, effort=effort), \
+                    mock.patch.object(llm_call, "_api_attempt", return_value=answer):
+                record = llm_call.call("task", backend="api", model=model, effort=effort, thinking="off")
+            self.assertEqual(record["unsupported_settings"], expected)
+
+    def test_api_request_sends_thinking_off_only_where_the_model_accepts_it(self):
+        sent = []
+
+        class Messages:
+            def create(self, **kwargs):
+                sent.append(kwargs)
+                return types.SimpleNamespace(
+                    usage=types.SimpleNamespace(input_tokens=1, output_tokens=1),
+                    content=[types.SimpleNamespace(type="text", text="ok")],
+                    model=kwargs["model"], stop_reason="end_turn")
+
+        fake = types.SimpleNamespace(Anthropic=lambda **_: types.SimpleNamespace(messages=Messages()),
+                                     RateLimitError=type("RateLimitError", (Exception,), {}),
+                                     APIConnectionError=type("APIConnectionError", (Exception,), {}),
+                                     APIStatusError=type("APIStatusError", (Exception,), {}))
+        with mock.patch.dict(sys.modules, {"anthropic": fake}):
+            for model, effort in (("haiku", "low"), ("sonnet", "high"), ("opus", "low"), ("haiku", "max")):
+                llm_call.call("task", backend="api", model=model, effort=effort, thinking="off")
+        self.assertEqual([body.get("thinking") for body in sent],
+                         [{"type": "disabled"}, {"type": "between_tools"}, None, None])
+
     def test_cli_absent_controls_are_not_invented_as_unsupported_requests(self):
         with mock.patch.object(llm_call.subprocess, "run", return_value=proc(envelope(thinking=None))):
             record = llm_call.call("task", backend="cli", thinking=None, max_tokens=None)
@@ -182,6 +213,14 @@ class CommonTest(unittest.TestCase):
         self.assertAlmostEqual(short, 0.005)
         long = common.estimate_cost("claude-haiku-5-5", {"input": 150_000, "output": 0})
         self.assertAlmostEqual(long, 0.075)
+
+    def test_estimate_cost_uses_published_cache_read_prices(self):
+        reads = {"input": 0, "output": 0, "cache_read": 1_000_000}
+        self.assertAlmostEqual(common.estimate_cost("opus", reads), 0.20)       # 0.05x input
+        self.assertAlmostEqual(common.estimate_cost("sonnet", reads), 0.20)     # 0.1x input
+        self.assertAlmostEqual(common.estimate_cost("claude-fable-5-1", reads), 0.25)
+        short_reads = {"input": 0, "output": 0, "cache_read": 50_000}          # below Haiku's long tier
+        self.assertAlmostEqual(common.estimate_cost("haiku", short_reads), 0.0005)  # default 0.1x input
 
     def test_make_splits_spreads_small_strata(self):
         ids = [f"u{i}" for i in range(40)]
