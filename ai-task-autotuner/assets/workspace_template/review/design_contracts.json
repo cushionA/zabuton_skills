@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "input_model": {
+    "business_unit": "",
+    "processing_unit": "",
+    "call_unit": "",
+    "valid_domain": "",
+    "invalid_input_policy": "",
+    "unsupported_input_policy": "",
+    "size_model": ""
+  },
+  "assumptions": [],
+  "contracts": [],
+  "coverage": {
+    "boundary": {"contracts": []},
+    "growth": {"contracts": []},
+    "relations": {"contracts": []},
+    "skew": {"contracts": []},
+    "interaction": {"contracts": []},
+    "prompt_context": {"contracts": []}
+  },
+  "rewrites": [],
+  "no_rewrite_reason": ""
+}

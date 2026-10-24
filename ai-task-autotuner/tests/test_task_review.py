@@ -17,6 +17,7 @@ import llm_call  # noqa: E402
 import quality_gate  # noqa: E402
 import run_experiment  # noqa: E402
 import task_review  # noqa: E402
+from contract_fixtures import item_contracts
 
 
 DATASET = '''
@@ -47,6 +48,7 @@ def run(unit, ctx):
 CHECK_IDS = (
     "goal_alignment", "input_sufficiency", "deterministic_safety",
     "output_contract", "evaluation_coverage", "leakage_and_difficulty",
+    "assumptions_and_stress", "conditional_test_contracts", "rewrite_and_prompt_design",
 )
 
 
@@ -81,6 +83,7 @@ class TaskReviewTest(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(contents, encoding="utf-8")
         common.write_json(self.ws / "eval/splits.json", {"dev": ["a", "b"], "holdout": []})
+        common.write_json(self.ws / "review/design_contracts.json", item_contracts())
         common.write_json(self.ws / "candidates/c000-baseline/config.json", {"concurrency": 1})
         common.append_jsonl(self.ws / "audit/close_read.jsonl", {
             "id": "a", "verdict": "ok", "evidence": "The label is explicit in the input.",
@@ -241,6 +244,7 @@ class TaskReviewTest(unittest.TestCase):
             "experiment_plan.md", "eval/eval_spec.md", "eval/dataset.py", "eval/score.py",
             "eval/splits.json", "candidates/c000-baseline/pipeline.py",
             "candidates/c000-baseline/prompts/system.txt", "candidates/c000-baseline/config.json",
+            "review/design_contracts.json",
         )
         for rel in paths:
             with self.subTest(changed=rel):
@@ -255,6 +259,55 @@ class TaskReviewTest(unittest.TestCase):
         charter = common.read_json(self.ws / "charter.json")
         charter["task"] = "A different task with the same files"
         common.write_json(self.ws / "charter.json", charter)
+        self.assertEqual(task_review.review_state(self.ws)[0], "STALE")
+
+    def test_legacy_six_check_review_cannot_approve_the_extended_design(self):
+        approved = self.pass_review()
+        approved["checks"] = approved["checks"][:6]
+        approved["version"] = 1
+        common.write_json(self.ws / "review/task_review.json", approved)
+        self.assertEqual(task_review.review_state(self.ws)[0], "PENDING")
+        with self.assertRaisesRegex(SystemExit, "task review PENDING"):
+            self.run_candidate()
+
+    def test_missing_or_incomplete_contract_plan_blocks_prepare_without_fake_approval(self):
+        path = self.ws / "review/design_contracts.json"
+        path.unlink()
+        with self.assertRaisesRegex(ValueError, "design_contracts"):
+            task_review.prepare_review(self.ws)
+        common.write_json(path, {"version": 1})
+        with self.assertRaisesRegex(ValueError, "input_model"):
+            task_review.prepare_review(self.ws)
+        self.assertFalse((self.ws / "review/task_review.json").exists())
+
+    def test_probe_definitions_are_frozen_but_observations_do_not_change_the_plan(self):
+        probe = self.ws / "review/probes/known_answers.json"
+        common.write_json(probe, {"a": "positive"})
+        approved = self.pass_review()
+        common.append_jsonl(self.ws / "review/contract_results.jsonl", {
+            "contract": "C1", "status": "passed", "candidate": "c000-baseline",
+            "evidence": "Synthetic fixture observation; not a real model experiment.",
+        })
+        self.assertEqual(task_review.review_state(self.ws)[0], "PASS")
+        self.assertEqual(task_review.prepare_review(self.ws)["design_hash"], approved["design_hash"])
+        common.write_json(probe, {"a": "negative"})
+        self.assertEqual(task_review.review_state(self.ws)[0], "STALE")
+        common.write_json(probe, {"a": "positive"})
+        extra = probe.with_name("extra.json")
+        common.write_json(extra, {"edge": "case"})
+        self.assertEqual(task_review.review_state(self.ws)[0], "STALE")
+        extra.unlink()
+        probe.unlink()
+        self.assertEqual(task_review.review_state(self.ws)[0], "STALE")
+
+    def test_efficiency_objective_change_needs_review_but_budget_updates_do_not(self):
+        self.pass_review()
+        ch = common.read_json(self.ws / "charter.json")
+        ch["limits"] = {"max_hours": 1}
+        common.write_json(self.ws / "charter.json", ch)
+        self.assertEqual(task_review.review_state(self.ws)[0], "PASS")
+        ch["efficiency_metric"] = "tokens_per_unit.output"
+        common.write_json(self.ws / "charter.json", ch)
         self.assertEqual(task_review.review_state(self.ws)[0], "STALE")
 
     def test_new_candidates_and_generated_references_do_not_restart_task_review(self):

@@ -17,6 +17,7 @@ import ledger  # noqa: E402
 import llm_call  # noqa: E402
 import run_experiment  # noqa: E402
 import task_review  # noqa: E402
+from contract_fixtures import item_contracts
 
 PY = sys.executable
 
@@ -121,8 +122,9 @@ class FlowTest(unittest.TestCase):
     def review_task(self):
         (self.ws / "experiment_plan.md").write_text("Label all expected toy items.\n", encoding="utf-8")
         (self.ws / "eval" / "eval_spec.md").write_text("Item label agreement, with every item counted.\n", encoding="utf-8")
+        common.write_json(self.ws / "review/design_contracts.json", item_contracts())
         request = task_review.prepare_review(self.ws, "c001-rule")
-        (self.ws / "review" / "task_review.md").write_text("Synthetic fixture: six checks verified.\n", encoding="utf-8")
+        (self.ws / "review" / "task_review.md").write_text("Synthetic fixture: nine design checks reviewed.\n", encoding="utf-8")
         result = self.ws / "review" / "task_review_result.json"
         common.write_json(result, {
             "design_hash": request["design_hash"],

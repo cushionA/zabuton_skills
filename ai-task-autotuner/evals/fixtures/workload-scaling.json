@@ -1,0 +1,71 @@
+{
+  "synthetic": true,
+  "task_contract": {
+    "goal": "Return every matching record pair, not a top-k approximation. The match predicate can legitimately accept multiple targets per source.",
+    "symbols": {
+      "N": "source records",
+      "M": "target records",
+      "K": "number of true matching pairs emitted"
+    },
+    "brute_force_route": "An existing router permits brute-force pair evaluation exactly when N*M <= 10000; above that it must use a bounded alternative or report that the exact task cannot meet budget.",
+    "logical_billing_unit": "One complete reconciliation job; also report per source record. Changing batch size does not change the denominator.",
+    "constraints": {
+      "per_request_input_token_limit": 4096,
+      "per_request_output_token_limit": 2048,
+      "no_silent_truncation": true
+    },
+    "quality": "Preserve all true matches or explicitly mark the run incomplete. Candidate pruning needs recall evidence. Streaming the complete result is permitted."
+  },
+  "threshold_probes": [
+    {
+      "N": 1,
+      "M": 9999
+    },
+    {
+      "N": 1,
+      "M": 10000
+    },
+    {
+      "N": 1,
+      "M": 10001
+    },
+    {
+      "N": 0,
+      "M": 10001
+    }
+  ],
+  "grouped_workloads": [
+    {
+      "id": "balanced",
+      "group_classes": [
+        {
+          "group_count": 100,
+          "source_records_per_group": 10,
+          "target_records_per_group": 10
+        }
+      ]
+    },
+    {
+      "id": "skewed",
+      "group_classes": [
+        {
+          "group_count": 1,
+          "source_records_per_group": 901,
+          "target_records_per_group": 901
+        },
+        {
+          "group_count": 99,
+          "source_records_per_group": 1,
+          "target_records_per_group": 1
+        }
+      ]
+    }
+  ],
+  "group_contract": "group_classes is a compact run-length representation of independent groups, not raw input records. Only records in the same group can match. Within each group, every source/target pair remains a candidate before evaluating the predicate.",
+  "dense_output_probe": {
+    "N": 2,
+    "M": 3,
+    "predicate": "All pairs match."
+  },
+  "measurements": "No runtime or model usage has been measured. Token limits are requirements, not observed token counts."
+}

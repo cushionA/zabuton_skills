@@ -16,16 +16,20 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import append_jsonl, digest, hash_paths, now_iso, read_json, sha256_file, write_json  # noqa: E402
 from quality_gate import gate_allows_runs  # noqa: E402
+from design_contracts import CONTRACT_PATH, load as load_contracts  # noqa: E402
 
 CHECKS = (
     "goal_alignment", "input_sufficiency", "deterministic_safety",
     "output_contract", "evaluation_coverage", "leakage_and_difficulty",
+    "assumptions_and_stress", "conditional_test_contracts", "rewrite_and_prompt_design",
 )
 DESIGN_FILES = (
     "audit/data_audit.md", "experiment_plan.md", "eval/eval_spec.md",
     "eval/dataset.py", "eval/score.py", "eval/splits.json",
+    CONTRACT_PATH,
 )
-CHARTER_FIELDS = ("task", "goal", "brief", "user_request", "may_change", "off_limits", "data", "primary", "guards")
+CHARTER_FIELDS = ("task", "goal", "brief", "user_request", "may_change", "off_limits", "data", "primary", "guards",
+                  "efficiency_metric")
 
 
 def _snapshot(ws, candidate, *, charter=None, gate=None):
@@ -38,9 +42,15 @@ def _snapshot(ws, candidate, *, charter=None, gate=None):
     missing = [str(p.relative_to(ws)) for p in required if not p.is_file()]
     if missing:
         raise ValueError("finish the draft design first: " + ", ".join(missing))
+    load_contracts(ws)
     ch = read_json(ws / "charter.json") if charter is None else charter
     gate = read_json(ws / "audit" / "quality_gate.json", {}) if gate is None else gate
-    files = [ws / rel for rel in DESIGN_FILES] + [cand]
+    # Definitions and synthetic/dev fixtures are reviewed; append-only outcomes
+    # live outside probes/ so execution does not change the approved test plan.
+    probes = ws / "review" / "probes"
+    if probes.exists() and not probes.is_dir():
+        raise ValueError("review/probes must be a directory of probe definitions/fixtures")
+    files = [ws / rel for rel in DESIGN_FILES] + [cand, probes]
     if ch.get("brief"):
         brief = Path(ch["brief"])
         brief = brief if brief.is_absolute() else ws / brief
@@ -61,7 +71,7 @@ def prepare_review(ws, candidate="c000-baseline"):
         raise ValueError("complete the data audit first: " + reason)
     snapshot = _snapshot(ws, candidate)
     request = {
-        "version": 1, "created": now_iso(), "design_hash": digest(snapshot),
+        "version": 2, "created": now_iso(), "design_hash": digest(snapshot),
         "snapshot": snapshot, "required_checks": list(CHECKS),
         "report": "review/task_review.md",
     }
@@ -90,7 +100,7 @@ def _validate_result(result):
         raise ValueError("record the actual reviewer id and kind")
     checks = result.get("checks")
     if not isinstance(checks, list) or len(checks) != len(CHECKS):
-        raise ValueError("review must cover all six checks exactly once")
+        raise ValueError(f"review must cover all {len(CHECKS)} checks exactly once; update legacy reviews")
     seen = set()
     for check in checks:
         if not isinstance(check, dict) or check.get("id") not in CHECKS or check["id"] in seen:
@@ -118,7 +128,7 @@ def record_review(ws, result_path):
         raise ValueError("review result is for a different design")
     report = _report_path(ws, result.get("report"))
     stored = {
-        "version": 1, "created": now_iso(), "status": status,
+        "version": 2, "created": now_iso(), "status": status,
         "design_hash": current, "snapshot": snapshot,
         "reviewer": result["reviewer"], "checks": result["checks"],
         "report": result["report"], "report_sha256": sha256_file(report),

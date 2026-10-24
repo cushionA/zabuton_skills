@@ -10,6 +10,7 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 import common  # noqa: E402
 import export_deliverables  # noqa: E402
+import ledger  # noqa: E402
 import quality_gate  # noqa: E402
 import relocate_workspace  # noqa: E402
 import run_experiment  # noqa: E402
@@ -35,6 +36,7 @@ class ExportReplayTest(unittest.TestCase):
         ch["data"]["aux"] = [str(self.external)]
         ch["brief"] = str(self.ws / "brief.md")
         (self.ws / "brief.md").write_text("Label all expected items.\n", encoding="utf-8")
+        common.write_json(self.ws / "review/probes/known_answers.json", {"good": "pos", "bad": "neg"})
         common.write_json(self.ws / "charter.json", ch)
         self.fixture.run_py("quality_gate.py", str(self.ws))
         self.fixture.review_task()
@@ -43,12 +45,68 @@ class ExportReplayTest(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             return fn(*args, **kwargs)
 
-    def measured(self):
-        r1 = self.quiet(run_experiment.run, self.ws, "c001-rule", "dev", "baseline", tag="one")
-        r2 = self.quiet(run_experiment.run, self.ws, "c001-rule", "dev", "baseline", tag="two")
+    def measured(self, exp=None):
+        r1 = self.quiet(run_experiment.run, self.ws, "c001-rule", "dev", "baseline", tag="one", exp=exp)
+        r2 = self.quiet(run_experiment.run, self.ws, "c001-rule", "dev", "baseline", tag="two", exp=exp)
         self.fixture.run_py("validate_eval.py", str(self.ws), "--runs", str(r1), str(r2),
                             "--spotcheck", "Read all toy errors and verified every reference label.")
         return r1, r2
+
+    def test_export_preserves_accepted_comparators_for_repeat_and_rollback_after_source_removed(self):
+        self.fixture.run_py("ledger.py", "propose", str(self.ws), "--candidate", "c001-rule",
+                            "--lever", "baseline", "--hypothesis", "initial rule")
+        self.measured(exp="E001")
+        self.quiet(ledger.decide, self.ws, "E001")
+        intermediate = self.ws / "candidates/c002-llm"
+        intermediate.joinpath("pipeline.py").write_text(test_flow.RULE_PIPELINE.replace(
+            '"good" in k', '"good" in k or ("fine" in k and int(unit["id"][1:]) % 2 == 0)'),
+            encoding="utf-8")
+        final = self.ws / "candidates/c003-final"
+        shutil.copytree(self.ws / "candidates/c001-rule", final)
+        final.joinpath("pipeline.py").write_text(test_flow.RULE_PIPELINE.replace(
+            '"good" in k', '"good" in k or "fine" in k'), encoding="utf-8")
+        for exp, name, hypothesis in (("E002", "c002-llm", "handle half the fine items"),
+                                       ("E003", "c003-final", "handle all fine items")):
+            self.fixture.run_py("ledger.py", "propose", str(self.ws), "--candidate", name,
+                                "--lever", "deterministic.pre", "--hypothesis", hypothesis)
+            final_run = self.quiet(run_experiment.run, self.ws, name, "dev", "experiment", exp=exp)
+            self.quiet(ledger.decide, self.ws, exp)
+            self.assertEqual(ledger._state(self.ws)["decisions"][exp]["decision"], "keep")
+        before = ledger._state(self.ws)
+        self.assertAlmostEqual(before["decisions"]["E001"]["primary"], 2 / 3)
+        self.assertAlmostEqual(before["decisions"]["E002"]["primary"], 5 / 6)
+        self.assertEqual(before["decisions"]["E003"]["primary"], 1)
+        hashes = {name: workspace.candidate_hash(self.ws / "candidates" / name)
+                  for name in ("c001-rule", "c002-llm", "c003-final")}
+        # Rejected candidate code is not a dependency merely because its old KEEP
+        # remains in append-only history.
+        rejected = self.ws / "candidates/c099-rejected"
+        shutil.copytree(final, rejected)
+        for decision in ("keep", "discard"):
+            common.append_jsonl(self.ws / "ledger.jsonl", {
+                "event": "decide", "exp": "E099", "candidate": rejected.name, "decision": decision})
+        out = self.tmp / "chain-export"
+        self.quiet(export_deliverables.export_workspace, self.ws, "c003-final", [final_run], out)
+        self.assertEqual(common.read_json(out / "replay.json")["retained_candidates"], sorted(hashes))
+        self.assertFalse((out / "candidates" / rejected.name).exists())
+        self.assertEqual({name: workspace.candidate_hash(out / "candidates" / name) for name in hashes}, hashes)
+        moved_data = self.tmp / "chain-data.jsonl"
+        shutil.copy2(self.external, moved_data)
+        self.external.unlink()
+        shutil.rmtree(self.ws)
+        relocate_workspace.relocate(out, [(str(self.external), str(moved_data))])
+        self.quiet(run_experiment.run, out, "c003-final", "dev", "experiment", exp="E003", tag="repeat")
+        self.quiet(ledger.decide, out, "E003")
+        repeated = ledger._state(out)
+        self.assertEqual(repeated["decisions"]["E003"]["decision"], "keep")
+        self.assertEqual(repeated["decisions"]["E003"]["best_exp"], "E002")
+        self.quiet(ledger.decide, out, "E003", override="discard", reason="test rollback after replay")
+        self.assertEqual(ledger._state(out)["best"]["exp"], "E002")
+        self.quiet(run_experiment.run, out, "c002-llm", "dev", "experiment", exp="E002", tag="repeat")
+        self.quiet(ledger.decide, out, "E002")
+        rolled_back = ledger._state(out)
+        self.assertEqual(rolled_back["best"]["exp"], "E002")
+        self.assertEqual(rolled_back["decisions"]["E002"]["best_exp"], "E001")
 
     def test_export_replays_after_source_removed(self):
         r1, r2 = self.measured()
@@ -69,6 +127,9 @@ class ExportReplayTest(unittest.TestCase):
         self.assertTrue((out / "candidates" / "c001-rule" / "pipeline.py").is_file())
         self.assertTrue((out / "runs" / r1.name / "outputs.jsonl").is_file())
         self.assertTrue((out / "audit" / "quality_gate.json").is_file())
+        self.assertEqual(common.read_json(out / "review/design_contracts.json"),
+                         common.read_json(self.ws / "review/design_contracts.json"))
+        self.assertTrue((out / "review/probes/known_answers.json").is_file())
         moved_data = self.tmp / "moved-data.jsonl"
         shutil.copy2(self.external, moved_data)
         self.external.unlink()

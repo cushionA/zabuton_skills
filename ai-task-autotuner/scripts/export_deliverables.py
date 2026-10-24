@@ -33,6 +33,7 @@ from workspace import candidate_hash, data_fingerprint, eval_hash, list_runs  # 
 from quality_gate import gate_allows_runs  # noqa: E402
 from task_review import task_review_allows_runs  # noqa: E402
 from relocate_workspace import relocate  # noqa: E402
+from ledger import KEEPS, _state as ledger_state  # noqa: E402
 
 
 def _round_up(x, step):
@@ -161,6 +162,17 @@ def export_workspace(ws, candidate, run_dirs=None, out=None):
         configs.append(meta.get("config", {}))
     if any(c != configs[0] for c in configs[1:]):
         raise ValueError("selected runs used different effective settings; select one measured configuration")
+    baseline = read_json(ws / "review" / "task_review.json")["snapshot"]["candidate"]
+    # The retained ledger can compare or roll back to every still-accepted candidate.
+    # Scores alone cannot establish attribution: those candidates' frozen code must
+    # survive removal of the source workspace as well as the final/reviewed baseline.
+    retained_candidates = {candidate, baseline}
+    retained_candidates.update(d["candidate"] for d in ledger_state(ws)["decisions"].values()
+                               if d.get("decision") in KEEPS)
+    for name in retained_candidates:
+        if (not isinstance(name, str) or name in ("", ".", "..") or "/" in name or "\\" in name
+                or not (ws / "candidates" / name / "pipeline.py").is_file()):
+            raise ValueError(f"cannot preserve accepted candidate {name!r}: candidate files are missing or invalid")
     out.mkdir(parents=True, exist_ok=True)
     shutil.copytree(cand, out / "candidates" / candidate, dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns("__pycache__"))
@@ -185,10 +197,8 @@ def export_workspace(ws, candidate, run_dirs=None, out=None):
         shutil.copy2(ws / "ledger.jsonl", out / "ledger.jsonl")
     # Budget, STOP, void and holdout history must not disappear on export. Scores
     # retain ledger comparability; large calls/outputs are kept only when needed.
-    baseline = read_json(ws / "review" / "task_review.json")["snapshot"]["candidate"]
-    baseline_dir = ws / "candidates" / baseline
-    if baseline != candidate:
-        shutil.copytree(baseline_dir, out / "candidates" / baseline,
+    for name in sorted(retained_candidates - {candidate}):
+        shutil.copytree(ws / "candidates" / name, out / "candidates" / name,
                         ignore=shutil.ignore_patterns("__pycache__"))
     for meta in list_runs(ws):
         src = Path(meta["_dir"])
@@ -227,6 +237,7 @@ def export_workspace(ws, candidate, run_dirs=None, out=None):
     write_json(out / "replay.json", {
         "version": 1, "source_workspace": str(ws), "candidate": candidate,
         "reviewed_baseline": baseline, "external_dependencies": sorted(set(external)),
+        "retained_candidates": sorted(retained_candidates),
         "retained_run_history": "all meta/summary/score and stripped call control events; selected runs include raw calls/outputs; baseline includes outputs",
         "source_data_hashes": read_json(ws / "audit" / "quality_gate.json", {}).get("data_hashes", {}),
     })
@@ -260,6 +271,8 @@ def export_workspace(ws, candidate, run_dirs=None, out=None):
                 "| path | content |", "|---|---|",
                 f"| candidates/{candidate}/ | final pipeline code, prompts and config (workspace layout: "
                 "run_experiment.py works on this folder) |",
+                "| candidates/ (other retained folders) | reviewed baseline and all currently accepted candidates; "
+                "frozen code for ledger comparisons, repeats and rollback |",
                 "| results/ | outputs and summaries of the full-scope / holdout runs passed to export |",
                 "| production_config.json | recommended settings with the measurements behind them |",
                 "| eval/, charter.json | dataset, splits, scorer, reference (provenance in eval/reference_provenance.json) - "

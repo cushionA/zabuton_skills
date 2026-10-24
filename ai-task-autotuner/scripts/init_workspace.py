@@ -14,6 +14,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import now_iso, read_json, write_json  # noqa: E402
 from llm_call import BACKENDS, resolve_backend, resolve_model  # noqa: E402
+from design_contracts import CONTRACT_PATH  # noqa: E402
 
 TEMPLATE = Path(__file__).resolve().parents[1] / "assets" / "workspace_template"
 
@@ -47,6 +48,11 @@ def migrate(ws):
     added = _merge_missing(ch, tpl)
     ch["skill_dir"] = str(TEMPLATE.parents[1])
     write_json(Path(ws) / "charter.json", ch)
+    contracts = Path(ws) / CONTRACT_PATH
+    if not contracts.exists():
+        contracts.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(TEMPLATE / CONTRACT_PATH, contracts)
+        print(f"design contracts: seeded {CONTRACT_PATH}; complete it and re-review (not an approval)")
     print("charter: added " + (", ".join(added) if added else "nothing") + " (existing values kept)")
 
 

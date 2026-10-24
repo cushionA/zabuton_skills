@@ -22,7 +22,7 @@ points) · stop rules · journal · running long jobs
    | grader/reference error | output looks right, score says wrong | fix eval (see evaluation.md), rescore |
    | harness | timeouts, truncation, parse failures | harness/output lever; not a model problem |
    | structure | info present but not used; same failure across many variants | decomposition, input representation |
-   | noise | item flips between identical runs | stop tuning this; more data or repeats |
+   | noise | item flips between identical runs | measure variability with repeats; retain confirmed contract violations |
 
 4. Write one hypothesis (below), make a new candidate by copying the best (or a branch
    point) to `candidates/cNNN-<slug>`, change only what the hypothesis needs, `diff -u` it.
@@ -37,13 +37,18 @@ them; historical mixed settings cannot be averaged as repeats of the same config
 
 ## Writing a hypothesis
 
-- One behavior, one root cause, one change (it may touch several places).
+- One behavior and one falsifiable hypothesis (it may touch several places). Start with a
+  single-factor probe, then test a specified risky interaction when independent changes miss
+  the failure; keep the interaction and its expected effect explicit.
 - `--expect`: predicted effect with a range, e.g. "+0.02..0.05 primary via 'unit-mismatch'
   items; cost unchanged". `--falsifier`: the result that would show you were wrong.
-- Scale the change to how many items show the behavior; a fix can gain at most what those
-  items lose. If that is below `min_delta`, it cannot be seen - pick a bigger target.
-- Generalize, never memorize: describe the failure behavior and the rule, do not paste
-  item content, ids or answers from dev into prompts. That overfits dev and fails holdout.
+- For aggregate optimization gains, scale the change to how many items show the behavior;
+  a fix can gain at most what those items lose. Below `min_delta`, the aggregate rule may
+  not distinguish the gain. Prefer a larger opportunity or a justified measurement plan,
+  while still fixing confirmed hard-contract violations and keeping their regression cases.
+- Generalize, never memorize selection-dev or holdout answers. Few-shot demonstrations may
+  come from synthetic cases or the predeclared group-disjoint example pool (task-design.md).
+  Do not move scored cases between partitions or edit the scorer to make a candidate win.
 - De-fluff every prompt change: cut platitudes ("be careful"), restated defaults and
   unfalsifiable advice. Fluff costs tokens on every call and dilutes the rules that matter.
 
@@ -57,46 +62,63 @@ Compared with the current best on the same split and eval version, items paired 
 - Quality phase: `keep` when primary improves by >= `min_delta` and more items improved than
   regressed; also `keep` a quality tie (|delta| < min_delta) that is >= 10% cheaper on the
   efficiency metric - simpler and cheaper wins ties. Otherwise `discard`.
-- Efficiency phase: `keep` when primary stays >= the floor and the efficiency metric improves
-  by >= `min_efficiency_gain` (10%), or primary improves at equal cost.
+- Efficiency phase: `keep` when primary respects its quality bound (>= the floor for `max`,
+  <= the ceiling for `min`) and the efficiency metric improves by >= `min_efficiency_gain`
+  (10%), or primary improves in its declared direction at equal cost.
 - A measured efficiency of zero is valid: positive -> zero is a 100% reduction and zero ->
   zero is a tie. Missing, non-finite or otherwise invalid measurements remain unknown; they
   cannot become a free candidate or a claimed efficiency gain.
-- `rerun`: a marginal keep (delta < 2x min_delta, or near the floor) from one run - repeat it
+- `rerun`: a marginal keep (delta < 2x min_delta, or near the quality bound) from one run - repeat it
   (`--tag r2`) and decide again on the pooled runs. The decision line also prints a
   unit-bootstrap 95% interval; when it straddles zero, more repeats beat more rounds.
 - Decisions keep the numbers of their time. After a scorer/reference change and `--rescore`,
   `status` re-pools the best from rescored runs and flags anything still stale. Changed source
   data, loader or splits require newly generated outputs, as described in evaluation.md.
+- These thresholds compare aggregate candidate performance. A reproducible hard-contract
+  violation remains a fault even when rare or statistically insignificant in the aggregate.
+  Apply its documented failure action and retain the counterexample; p-values do not rank
+  severity. A contract definition is not a test execution result.
 - `--override keep|discard --reason` exists for evidence the rules cannot see; use rarely and
   say why. Discarded and kept candidates both stay on disk.
 
 ## Phases
 
-**Quality phase** - maximize the primary metric under the guards. Ends when the quality target
+**Quality phase** - improve the primary metric in its declared direction under the guards. Ends when the quality target
 is met, or on plateau: >= `patience` (5) non-keeps since the last keep, covering >= 3 lever
 groups, with a fresh-eyes round done. Before declaring a plateau, re-measure noise on the
 incumbent (`validate_eval.py WS --renoise RUN_A RUN_B` on two runs of the best): a stabilized
 prompt often flips far fewer items than the baseline did, which lowers min_delta and can reveal
-headroom the baseline noise hid. Then `ledger.py phase WS efficiency` (floor = best minus
-min_delta) and, optionally, one holdout check of the best (`--split holdout --purpose holdout`)
+headroom the baseline noise hid. Then `ledger.py phase WS efficiency` (quality bound = best minus
+`min_delta` for `max`, best plus `min_delta` for `min`) and, optionally, one holdout check of the best (`--split holdout --purpose holdout`)
 to catch overfitting early.
 
-**Efficiency / structure phase** - hold the floor, cut cost per unit, latency, or calls;
-simplify. Order the levers by expected gain per risk:
+Structural rewrites and prompt/context tests are eligible in either phase. Use the input model
+and [conditional contracts](robustness.md) to investigate assumptions, information loss and
+scale before adding more instructions. A rewrite must preserve semantic decisions, including
+alternative conditions and global constraints; old-model answer equality is not the oracle.
+
+**Efficiency / structure phase** - respect the quality bound, cut cost per unit, latency, or calls;
+simplify. Choose the order by expected gain and risk; structural waste may dominate wording:
 1. hygiene: remove instructions the model does not need, shrink input to what decisions use,
    compact output (ids, codes, no prose rationale unless it measurably helps), static prefix
    first for caching;
 2. deterministic work: rule pre-filters, exact-match shortcuts, candidate pruning - the
    model only sees what needs judgment;
 3. structure: batch several units or items per call, or split one heavy call into a cheap
-   screen plus a focused second pass only where needed (cascade);
+   screen plus a focused second pass only where needed (cascade); test shared context,
+   compact attribute mappings and code joins when applicable. Preserve global constraints
+   through reconciliation or a solver where possible; a single giant call is not required;
 4. model x effort staircase: from the current cell, step effort down; when quality holds,
    step down; when it fails, step right at most 1-2 notches; prune cells projected to cost
    more than the incumbent; stop when no unprobed cell is projected cheaper;
 5. re-check one quality lever on the cheaper configuration (prompt wins do not always transfer).
 
 Report cost per completed unit, not per call: a cheaper call that fails more is not cheaper.
+Keep the evaluation denominator fixed and report failures against the original scope. Inspect
+input and output tokens separately, including repeated context and required output size. If
+the configured efficiency objective is call count, explicitly report its token blind spot;
+it cannot establish a token reduction. Measure growth against relevant input sizes and output
+`K`, and validate the complete pipeline after a local optimization.
 Each efficiency keep may give back a little quality; `status` prints the DRIFT since the phase
 switch and warns when the cumulative drop exceeds min_delta - check holdout before cutting further.
 Runs broken by infrastructure (quota, outages) never count: the ledger skips quota-exhausted runs,
@@ -119,10 +141,11 @@ diversity mechanically; your job is to take its advice seriously.
 - **FRESH_EYES** (three non-keeps since the last keep). Do all three, then
   `ledger.py mark WS fresh-eyes "<what changed in your understanding>"`:
   1. Re-bucket all remaining dev failures (table above) with counts.
-  2. Headroom probe - one dev run that tells you where the ceiling is, e.g. the same prompt
-     on an explicitly configured stronger model (if it also fails, the spec or reference is the problem, not model
-     capacity); or feed one stage oracle input (true candidates, true attributes) to measure
-     the ceiling of the next stage; or an ablation removing a component. Run it with
+  2. Headroom probe - a bounded diagnostic on approved development cases: the same prompt
+     on an explicitly configured stronger model, verified/oracle input to one stage, or an
+     ablation removing a component. A stronger model's failure does not identify the cause;
+     an oracle intervention estimates downstream headroom under changed inputs, not a proven
+     ceiling or the original stage's incapacity. Confirm repairs end to end. Run it with
      `--purpose probe` and record it with `ledger.py mark WS headroom "<result>"`. Probes are
      diagnostics, never candidates.
   3. Fresh subagent, deliberately without the ledger or journal (no anchoring). Give it
@@ -188,6 +211,10 @@ already fired, report which checks were not run and use existing evidence.
 3. Full-scope run (`--split full --purpose full`) for time, usage and outcome distribution.
    If it includes holdout ids it also consumes a peek for that candidate's identity, bytes
    and effective settings; identical repeats of an already evaluated candidate share its peek.
+   Review applicable contract results for the chosen candidate as well: record passed, failed,
+   inconclusive or not-run checks with evidence, including supported-size limits. Execute only
+   the remaining risk-relevant checks that the budget permits; do not imply coverage from a
+   complete definition file alone.
 4. Write `WS/task_design.md` (task-design.md) and `WS/report.md` (report.md), then run
    `export_deliverables.py WS --candidate <best> --runs <full run> <holdout run>` for the
    measured production settings and replay dependencies. Use an empty export destination;

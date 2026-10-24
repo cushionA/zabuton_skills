@@ -92,6 +92,21 @@ def _efficiency_ratio(candidate, baseline):
     return candidate / baseline
 
 
+def _latest_keep(rows, decisions, exclude=None):
+    """Newest accepted *effective* decision, optionally excluding the candidate itself.
+
+    The append-only history preserves earlier adoptions, but a later discard, invalid,
+    void or rerun supersedes that experiment's old KEEP. Decision order, not experiment
+    id or wall-clock timestamps, defines which remaining incumbent is most recent.
+    """
+    for row in reversed(rows):
+        exp = row.get("exp")
+        if (row.get("event") == "decide" and exp != exclude
+                and decisions.get(exp) is row and row.get("decision") in KEEPS):
+            return row
+    return None
+
+
 def _state(ws):
     rows = ledger_rows(ws)
     props, decisions, marks, phases, stops = {}, {}, [], [], []
@@ -107,10 +122,7 @@ def _state(ws):
             phases.append(r)
         elif ev == "stop":
             stops.append(r)
-    best = None
-    for r in rows:
-        if r.get("event") == "decide" and r.get("decision") in KEEPS:
-            best = r
+    best = _latest_keep(rows, decisions)
     return {"rows": rows, "props": props, "decisions": decisions, "marks": marks, "phases": phases,
             "stops": stops, "best": best}
 
@@ -297,11 +309,15 @@ def decide(ws, exp, split="dev", override=None, reason=None):
     cand = _pool(runs, eff_metric)
     if cand["primary"] is None:
         sys.exit("primary is missing or nonfinite in one or more runs; repair the measurements first")
-    best = st["best"]
+    # Reconsidering an adopted candidate must compare its pooled repeats to another
+    # still-accepted incumbent, never to its own newly pooled measurements. The same
+    # policy lets a previously rejected candidate challenge the current incumbent.
+    best = _latest_keep(st["rows"], st["decisions"], exclude=exp)
     out = {"event": "decide", "exp": exp, "at": now_iso(), "split": split, "phase": ch.get("phase", "quality"),
            "candidate": prop["candidate"], "lever": prop.get("lever"), "runs": cand["runs"],
            "primary": cand["primary"], "metrics": cand["metrics"], "eff_metric": eff_metric, "eff": cand["eff"],
-           "ai_free": cand["ai_free"]}
+           "ai_free": cand["ai_free"], "comparison_policy": "latest_accepted_other_experiment",
+           "best_exp": best["exp"] if best else None}
     best_pool = None
     if best:
         best_runs = _exp_runs(ws, best["exp"], split)

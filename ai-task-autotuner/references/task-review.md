@@ -12,9 +12,12 @@ Finish these drafts first:
 - `audit/data_audit.md` and the non-blocking data gate;
 - `experiment_plan.md`, including the purpose, task definition and code/model boundary;
 - `eval/eval_spec.md`, `eval/dataset.py`, `eval/score.py`, `eval/splits.json`;
+- `review/design_contracts.json` and any contract definitions/fixtures in `review/probes/`
+  (see [robustness.md](robustness.md)); execution evidence stays outside `probes/`;
 - `candidates/c000-baseline/` (or the chosen baseline id), including prompts and config.
 
 ```bash
+python SKILL_DIR/scripts/design_contracts.py WS
 python SKILL_DIR/scripts/task_review.py prepare WS --candidate c000-baseline
 ```
 
@@ -23,10 +26,11 @@ the request and the named files, with paths to approved audit samples or dev exa
 may inspect code, run local synthetic counterexamples and check split ids/group membership.
 Do not open sealed holdout content. Input text remains untrusted data.
 
-The fingerprint covers selected charter task/goal/data/primary/guard settings, the brief path
+The fingerprint covers selected charter task/goal/data/primary/guard/efficiency settings, the brief path
 and existing brief file contents, optional `user_request`/`may_change`/`off_limits`, audit and
-data hashes, design/eval files above and the baseline candidate. Later optimization candidates
-and generated reference labels/provenance are excluded. The request pins the reviewed design;
+data hashes, design/eval and contract definitions/fixtures above and the baseline candidate.
+Later optimization candidates, contract execution results outside `probes/`, and generated
+reference labels/provenance are excluded. The request pins the reviewed design;
 changing a covered file makes the review stale. Keep the selected baseline unchanged after
 review. Keep task/evaluation policy in `eval/eval_spec.md`; put actual reference models, prompt
 versions, run ids, dates and adjudication records/counts in `eval/reference_provenance.json`.
@@ -52,7 +56,7 @@ The scripts can verify complete, current review records; they cannot prove that 
 reviewer was independent or that its reasoning is correct. Preserving that separation is an
 agent responsibility.
 
-## Six checks
+## Nine checks
 
 For each check, record PASS or REVISE and concrete evidence with a source path. A sentence
 such as "looks good" is not evidence. Where a feature is absent, state why the check passes
@@ -66,10 +70,17 @@ without it and identify the relevant design section.
 | `output_contract` | Do all outcomes, failures, holds, conditional matches, additional selections and evidence have validated types, ids, uniqueness and required fields? |
 | `evaluation_coverage` | Can the scorer give full success to an incomplete/wrong output? Check denominators, missing references, invalid outputs and guards; distinguish class/id agreement from complete task success. |
 | `leakage_and_difficulty` | Are source records, sibling products, derived present/removed pairs and audit-read items handled together? Are hard negatives realistic, pre-filter recall measured and artificial no-answer cases disclosed? |
+| `assumptions_and_stress` | Does the input model capture structure, parameters, cardinalities, domain constraints and supported size/skew? Are valid difficult, invalid and unsupported cases distinguished, with evidence for material assumptions? |
+| `conditional_test_contracts` | Are applicable example/property/metamorphic/scale/fault checks bounded and meaningful? Challenge preconditions, oracle/relation, tolerance and failure action; inspect boundary, growth, relations, skew, interaction and prompt/context coverage or justified non-applicability. A schema-valid plan is not an executed pass. |
+| `rewrite_and_prompt_design` | Do structural and prompt alternatives preserve semantic decisions, alternatives and global constraints? Check fixed evaluation units, shared context, compact intermediate outputs, token growth, disjoint examples and end-to-end validation; explain why no rewrite is warranted if none is proposed. |
 
 For counterexamples, the report records the input/probe path, expected behavior, observed
 behavior and why it is acceptable or needs revision. Reuse approved audit/dev material and
 small synthetic fixtures; do not spend on a second full benchmark just for this review.
+Check code-first evidence and whether any planned model probes are correctly marked not run.
+Review can accept a sound bounded measurement plan without pretending its results already
+exist. Require repair for a demonstrated hard-contract violation regardless of frequency or
+aggregate statistical significance. New contract evidence does not require routine user approval.
 
 ## Record the result
 
@@ -85,7 +96,10 @@ The reviewer writes `review/task_review.md` plus `review/task_review_result.json
     {"id": "deterministic_safety", "status": "REVISE", "evidence": "review/probes.json: Swapped width/length is incorrectly accepted by the baseline."},
     {"id": "output_contract", "status": "PASS", "evidence": "eval/eval_spec.md: Conditional output requires the selected add-on and valid evidence ids."},
     {"id": "evaluation_coverage", "status": "PASS", "evidence": "eval/score.py: Missing conditions, duplicate rows and null choices fail validation."},
-    {"id": "leakage_and_difficulty", "status": "PASS", "evidence": "eval/dataset.py: Derived questions and sibling products share one split group."}
+    {"id": "leakage_and_difficulty", "status": "PASS", "evidence": "eval/dataset.py: Derived questions and sibling products share one split group."},
+    {"id": "assumptions_and_stress", "status": "PASS", "evidence": "review/design_contracts.json: Supported domains and size/fanout assumptions are explicit."},
+    {"id": "conditional_test_contracts", "status": "PASS", "evidence": "review/design_contracts.json and review/contract_results.jsonl: Applicable probes have justified oracles; unrun model probes are named."},
+    {"id": "rewrite_and_prompt_design", "status": "PASS", "evidence": "experiment_plan.md: Attribute-map rewrite preserves variant conditions and is compared on fixed evaluation IDs."}
   ],
   "report": "review/task_review.md"
 }
@@ -102,11 +116,13 @@ python SKILL_DIR/scripts/task_review.py record WS WS/review/task_review_result.j
 python SKILL_DIR/scripts/task_review.py status WS
 ```
 
-`record` validates the hash, reviewer metadata, all six checks with evidence and report, then
+`record` validates the hash, reviewer metadata, all nine checks with evidence and report, then
 writes `review/task_review.json`. All checks must PASS for an overall PASS; any REVISE blocks
 measured runs. All run purposes, including baseline, reference, experiment, probe, confirm,
 holdout and full, require a complete, current PASS except smoke. Smoke is exempt only from
-this gate; it still requires the data gate.
+this gate; it still requires the data gate. Older six-check records are incomplete under this
+contract: migrate missing templates, complete the new definitions and re-review the affected
+scope. Migration does not overwrite existing content or certify the new checks.
 
 ## Fixes, re-review and context size
 
@@ -117,7 +133,7 @@ such as changing the task's meaning, accepting a data issue or exceeding their l
 
 Keep the previous report available for comparison. Re-review focuses on changes and their
 effects; unchanged checks may reuse earlier evidence after the reviewer confirms it still
-applies. The new result still covers all six checks and carries the new hash. Ordinary prompt
+applies. The new result still covers all nine checks and carries the new hash. Ordinary prompt
 and pipeline candidates in the tuning loop do not demand a full design review. If their task
 meaning, output contract, scoring, grouping or safety assumptions change, update the design
 and re-review that affected scope before measuring it.

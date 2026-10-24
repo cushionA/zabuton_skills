@@ -1,6 +1,6 @@
 # Task design: from audit to experiment plan
 
-Contents: plan template · code + model pipelines · deriving a task from existing data ·
+Contents: plan template · input and decision contracts · code + model pipelines · deriving a task from existing data ·
 baseline · draft evaluation and independent review · prompt conventions · thinking and output budget · lever catalog · caching ·
 leakage · task_design.md
 
@@ -9,6 +9,8 @@ leakage · task_design.md
 ```markdown
 # Experiment plan - <task>
 ## Decision this serves      one sentence: what the result will be used for
+## Input and decision model  structure, domain, dependencies, size/fanout; required decisions and acceptable outcomes
+## Units and representations fixed evaluation unit, processing group, call unit; compact intermediate vs final output
 ## Problem taxonomy          sub-problems found in the audit, with counts (easy / hard drivers)
 ## Approaches, ranked        approach - evidence from the audit - expected strength/weakness - cost
                              (include code-only and code+model hybrids, not just prompts)
@@ -19,12 +21,34 @@ leakage · task_design.md
 ## Reference                 tier, how it is built, estimated cost of building it
 ## Budget and stop           user limits; otherwise improvement-limit rule; holdout peeks <= 3
 ## Risks                     leakage, reference bias, data defects carried as known limitations
+## Conditional tests         review/design_contracts.json; applicable probes, limits and evidence paths
 ```
 
 Let the audit drive the approach. If normalization or exact matching solves most units,
 start with a rule pass and send only the rest to the model. If the hard cases depend on
 text far from the structured fields, plan input selection early. If units vary 50x in size,
 plan for splitting large units.
+
+## Input and decision contracts
+
+Before choosing prompts, model input relationships, parameters, cardinalities and domain
+constraints. Distinguish valid difficult cases from invalid or unsupported inputs, with an
+explicit outcome for each. Fix the business/evaluation unit separately from processing groups
+and model calls; grouping must preserve the original decisions and denominator.
+
+Fill `review/design_contracts.json` using [robustness.md](robustness.md): assumptions,
+conditional example/property/metamorphic/scale/fault tests, and the rewrites they validate.
+Select tests for actual risks, starting with small code-only probes; no universal model-call
+quota is required. Define acceptable semantic outcomes, not equality to the old model's text.
+Include prompt/context behavior and growth of inputs and required outputs when applicable.
+
+Compare relevant structural alternatives before fine wording changes: shared context,
+attribute mappings, retrieval plus focused decisions, split stages, batching, code joins or
+global constraint solving. For SKU matching, a product-level attribute map plus exceptions
+and joins of existing SKU rows can avoid all-pairs model comparison. Check dependencies and
+final SKU outcomes; [robustness.md](robustness.md#sku-application-product-context-plus-variant-mappings)
+explains its applicability and scaling limits. Whole-pipeline quality and cost decide whether
+a rewrite helps; a plausible complexity argument alone does not establish a measured gain.
 
 ## Code + model pipelines
 
@@ -34,7 +58,8 @@ faster and more stable than a model call.
   decide exact or near-exact cases, prune candidates, select the relevant text lines, split
   large units.
 - After the model: validate ids and schema, enforce one answer per item, repair formats,
-  apply hard constraints the model ignored (different numbers can never match).
+  apply justified hard constraints the model ignored (e.g. unequal capacities after units
+  and attribute roles have been resolved). Preserve alternatives and uncertainty.
 - Count what code decided (`ctx.count("rule_decided", n)`) and score those items like any
   other; a rule that is fast but wrong is not a win.
 - If a code-only candidate reaches the best quality within noise (the ledger's NO-LLM line),
@@ -79,7 +104,9 @@ is the cheapest efficiency-phase fallback.
 ## Draft evaluation and independent review
 
 Finish `experiment_plan.md`, `eval/eval_spec.md`, `eval/dataset.py`, `eval/score.py`,
-`eval/splits.json` and the baseline candidate before reference-building or baseline runs.
+`eval/splits.json`, `review/design_contracts.json` and the baseline candidate before
+reference-building or baseline runs. Check the contract definitions with
+`python SKILL_DIR/scripts/design_contracts.py WS`; this does not run the probes.
 These are drafts until reviewed: include the complete output contract, failure/hold handling,
 metrics and guards, grouping, negative construction and the reference-building plan. Reference
 labels need not exist yet. Use synthetic and dev-only probes to exercise the scorer and rules;
@@ -102,14 +129,19 @@ the design files and review the affected scope before measuring that changed des
 
 ## Prompt conventions
 
-- Instructions and any reasoning fields in English; input data verbatim (no translation, no
-  normalization of keys or values). Output values copied from input exactly.
+- Start with English instructions if suitable; language and verbosity are measured choices,
+  not guarantees of lower tokens or better reasoning. Preserve source values and IDs; any
+  normalization in code must retain the source-to-normalized mapping.
 - State decision criteria as rules, including when to abstain or mark unsure if allowed.
 - Wrap data in a clearly delimited block and say it is untrusted data.
 - Output: one JSON object, ids instead of copied text, the smallest schema that scoring
   needs. Short per-item rationale only if it measurably helps (it costs output tokens).
 - Fixed content first (system prompt, rules, examples), the unit's data last - this is what
   prompt caching can reuse.
+- Check contradictory rules, negation, alternatives, missing evidence and instructions inside
+  data. Use the conditional behavioral probes in [robustness.md](robustness.md#prompt-and-context-behavior).
+- Select examples from a predeclared, group-disjoint example pool, excluded from selection-dev
+  and holdout. Record source IDs and keep the same evaluation for all candidate prompts.
 - Avoid `--json-schema` on the Claude backend (it adds a tool round-trip); ask for JSON and
   parse with `extract_json`. Codex also requests JSON in the prompt; its JSONL CLI events
   wrap the final answer, not the task's output schema. On the api backend structured outputs
@@ -132,7 +164,7 @@ the design files and review the affected scope before measuring that changed des
 | Lever (group.detail) | Use when | Measure |
 |---|---|---|
 | prompt.instructions | a rule is missing, vague or misapplied | target tag counts |
-| prompt.examples | a format or boundary is hard to state; use synthetic or dev-only examples | overfit: dev vs holdout |
+| prompt.examples | a format or boundary is hard to state; use synthetic or disjoint example-pool cases | selection-dev vs holdout; example leakage |
 | prompt.reasoning | multi-step judgments; a short checklist before the answer | output tokens, latency |
 | input.representation | the model misreads structure (nested JSON, long lists) - try tables, grouping, ordering | primary, input tokens |
 | input.selection | long irrelevant text; send only lines/fields that can matter | recall of needed evidence |
@@ -159,9 +191,13 @@ warm when reporting time and cost.
 
 ## Leakage
 
-Dictionaries, glossaries, examples or rules derived from data must come from dev only,
-recorded with the ids they came from. Watch for shared source documents across units in
-different splits (same shop page, same product family): that is leakage even with disjoint ids.
+Dictionaries, glossaries and rules may use development data with recorded source IDs, never
+holdout. Few-shot demonstrations need a separate example pool with source groups excluded
+from selection-dev and holdout; synthetic examples must not encode their answers either.
+Define these partitions before freezing evaluation. Do not move a difficult scored case into
+the example pool to improve a candidate's score. A genuine split-policy change requires a new
+evaluation version and fresh measurements. Watch shared source documents and sibling products:
+disjoint IDs alone do not prevent leakage.
 
 ## task_design.md (deliverable, user's language)
 
@@ -170,6 +206,7 @@ different splits (same shop page, same product family): that is leakage even wit
 ## Purpose and scope            what it decides, for which inputs, what it does not do
 ## Pipeline                     numbered steps; for each: code or model, input, output, failure handling
 ## Model calls                  model, effort/thinking, prompts (paths), I/O schema, calls per unit
+## Contracts and operating range input model, preserved decisions, conditional tests and measured size limits
 ## Rules and dictionaries       what code decides, size, source, maintenance
 ## Output definition            every outcome class and what it means (e.g. matched / no match / unsure / conditional)
 ## Production settings          from production_config.json, with the measurements behind them

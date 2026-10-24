@@ -12,19 +12,29 @@ reported by the backend" - never fill gaps with estimates presented as measureme
    steps, prompts by path), backend, CLI/SDK version, model requested/served, effort,
    concurrency, retries/timeouts. Extra data, derived vocabularies or external fetches, kept
    separate from the "provided inputs only" condition.
+   Distinguish fixed business/evaluation units, processing groups and model calls. Explain
+   compact intermediate representations, code expansion and preserved global constraints.
 3. **Scope** - units and items in scope vs original totals; exclusions with reasons and counts;
    subsets used for dev/holdout/full with ids file paths; auxiliary/load-test data kept apart.
+   State the valid domain and size/skew range, and handling of invalid versus unsupported
+   inputs. Keep group-disjoint few-shot examples separate from selection-dev and holdout.
 4. **Data audit** - gate result, findings by severity, known limitations, data defects found.
 5. **Evaluation** - primary and guard metrics, reference tier and how it was built
    (model, runs, disagreement rate, adjudication counts, human-checked sample size), splits
    and grouping, noise floor, validation checks. What may be called accuracy and what not.
    Link the reviewed policy in `eval/eval_spec.md` and the actual reference-build records in
    `eval/reference_provenance.json`; keep run metadata out of the frozen policy document.
+   Link `review/design_contracts.json` and separate execution evidence: selected conditional
+   tests, assumptions, oracle/relation, tolerance and passed/failed/inconclusive/not-run status.
+   Explain material non-applicability. Definition validation is not execution or correctness.
 6. **Results** - per outcome class (e.g. matched / no match / unsure / conditional /
    failed / not processed) counts against the total, which classes count as auto-decided;
    breakdown by the audit's strata (asymmetric cases, sizes, missing text...); quality on dev
    and holdout; pass^k and flaky items. Do not present attribute-level or candidate-rank
    numbers as overall correctness.
+   Report confirmed rare contract failures separately from aggregate score changes; severity
+   is not determined by a p-value. A stage-oracle probe is diagnostic evidence under an
+   intervention, not proof of the cause of every end-to-end error.
 7. **Time** - run wall time, sum of unit times, per unit and per item (state which is an
    apportioned average and which is a measured per-call latency), median/p90/slowest units,
    concurrency, cold vs warm cache, retries and timeouts.
@@ -34,6 +44,10 @@ reported by the backend" - never fill gaps with estimates presented as measureme
    An uncached cost estimate remains unknown if any required token component is unreported.
    Positive -> zero efficiency is a 100% reduction; zero -> zero is a tie. State any observed
    limit overrun caused by calls already in flight rather than claiming an absolute USD cap.
+   Show total input (including cache reads/writes) and output separately. State the efficiency
+   objective and its limits: fewer calls alone does not establish fewer tokens. For applicable
+   scale checks, show actual input sizes (`N`, `M`, fanout/skew) and required output `K` alongside
+   tokens, time and completeness; label predicted growth separately from measured results.
 9. **Improvement history** - ledger table: experiment, lever, hypothesis (short), delta,
    decision; what moved the score and why; what did not work (dead ends are findings too);
    phase switch point; stop reason.
@@ -62,6 +76,10 @@ recommendation has a single reproducible configuration.
 The package includes the selected pipeline, the baseline candidate checked by task review,
 design/eval files, audit and any recorded user acceptance, task review, ledger, run
 metadata/summaries/scores, selected calls/outputs and baseline outputs needed for validation.
+It also retains candidate code for all currently accepted experiments needed for comparison
+or rollback.
+Include the contract definitions, relevant fixtures and separate execution evidence under
+`review/`; definitions and observations serve different purposes during replay.
 Unrelated raw prompts/calls/outputs are omitted; rescoring those historical runs needs the
 original workspace. `replay.json` lists retained history and external dependencies. Supplied
 raw inputs outside the workspace are not silently copied into the package.
