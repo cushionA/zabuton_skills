@@ -1,7 +1,7 @@
 """Build and track a reference (expected answers) when the data has no labels.
 
   python reference.py merge WS RUN_A RUN_B [--split dev]
-      Compare two independent strong-model runs (purpose=reference) item by item using
+      Compare two configured reference runs (purpose=reference) item by item using
       score.flatten(unit, output) -> {key: label}. Agreements go to
       eval/reference/<split>.jsonl (source "agree:<model>"); disagreements and items
       missing from either run go to <split>.disagreements.jsonl for adjudication.

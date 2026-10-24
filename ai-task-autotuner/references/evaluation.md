@@ -3,6 +3,10 @@
 Contents: metrics by task type · hard gates and failure classes · splits · reference tiers
 and the silver protocol · LLM judges · validation and noise · changing the eval · naming numbers
 
+For uncertain references, model judges or cost-sensitive acceptance, use
+[evaluation-trust.md](evaluation-trust.md): sampling and adjudication, conditional judge
+controls, risk/coverage denominators, threshold selection and sample-size assumptions.
+
 ## Before baseline: review the draft
 
 Write the draft spec, loader, scorer, splits and baseline candidate during Design, then obtain
@@ -37,6 +41,9 @@ that must not get worse.
 worse than a hold. Make the primary metric reward correct decisions, and put a hard guard on
 the false-accept rate (e.g. `{"metric": "false_accept_rate", "max": 0.02}`); otherwise the
 loop learns to guess. Report coverage (share auto-decided) separately; it is not accuracy.
+Define the numerator and denominator of every error guard. An error fraction among automatic
+decisions is different from one over all inputs. A justified hold may be the correct answer;
+keep it in scope and report its operational cost separately.
 
 ### Metric direction and quality bounds
 
@@ -95,9 +102,10 @@ the distance from the observed primary to that optimum in the configured directi
   in-scope set for time/usage/outcome distribution; accuracy only where references exist.
 - Random, stratified by the audit's strata, **group-aware** (`group_of`: near-duplicates,
   same source page, same parent product stay in one split). Never choose by baseline score.
-- Size dev so the noise floor is below the improvements you care about: for a binary item
-  score the 95% half-width is about `1/sqrt(n_items)` per run. Items, not units, set n, but
-  items in one unit are correlated - prefer more units over more items per unit.
+- Size dev for the effects and error bounds that matter, accounting for source-group
+  correlation. For independent binary observations the worst-case normal-approximation 95%
+  half-width is about `0.98/sqrt(n)`; this is not a rare-error bound or a paired power analysis.
+  Prefer more independent products/documents over many correlated items from a few groups.
 - Predefined subsets in the data (e.g. "smoke_10", "largest_20") are fine as dev/holdout if
   they are disjoint after grouping; record which ids and why.
 
@@ -108,14 +116,17 @@ evaluations that include held-out ids require `--purpose holdout` or `--purpose 
 current PASS review and a current PASS eval validation. A smoke, probe, baseline or experiment
 purpose cannot expose holdout by another name. Holdout reference preparation is the separate exception
 below; it does not score target performance or count as a target peek.
+Thresholds and judge prompts are tuned on development/calibration data, not on repeated
+final holdout feedback. A peek cap is not a guarantee against adaptive overfitting; see
+[the selection protocol](evaluation-trust.md#define-loss-denominators-and-a-selection-protocol).
 
 ## Reference tiers
 
 | Tier | Source | May be called |
 |---|---|---|
-| gold | human labels with stated provenance | accuracy |
+| gold | human-adjudicated or independently verified expected outcomes, with provenance | accuracy on that defined scope |
 | verified silver | silver + human check of a stated sample | agreement with reference (sample-verified) |
-| silver | strong model x2 + adjudication | agreement with <model> reference |
+| silver | configured reference-model variants + adjudication | agreement with <model> reference |
 | same-model reference | target model x2 + adjudication; no independent correctness check | agreement with same-model reference |
 | none | - | only coverage, consistency, rule violations |
 
@@ -124,8 +135,8 @@ below; it does not score target performance or count as a target peek.
 1. Follow `reference_model` in the charter. On Codex it defaults to Luna (`gpt-6-luna`), as
    does the target; never automatically switch to a stronger model. Record this as a same-model
    reference and disclose that agreement may measure shared errors/self-similarity, not
-   independent correctness. Strong independent silver requires an explicitly configured
-   different/stronger reference model; Claude's default remains `opus` (or an explicitly
+   independent correctness. A different/stronger reference must be explicitly configured;
+   it may still share errors with the target. Claude's default remains `opus` (or an explicitly
    selected `sonnet`). Never use the candidate being tuned to produce its own labels. Smoke
    one unit and extrapolate to two runs x (dev + holdout); report supported costs and quota
    exposure first, leaving unknown costs unknown. Do not infer Luna pricing from another model.
@@ -155,17 +166,29 @@ below; it does not score target performance or count as a target peek.
    it just to add run metadata. Expect the silver reference to share the reference model's
    blind spots; a target that imitates them looks better than it is.
 
-## LLM judges (generative tasks only)
+Record the sampling method and evidence for reviewed agreements as well as disagreements.
+A human-checked sample does not promote all other labels to gold. Treat source-supported
+uncertainty as an explicit outcome, not a reference defect to exclude; finite multiple correct
+answers can use `acceptable`, while open-ended correctness may need a semantic rubric.
 
-Code first; a judge only for what code cannot decide. One criterion per judge. Anchored
-rubric, structured output with evidence, emit classes and map to scores outside the model,
-randomize pair order, forbid rewarding length, different/stronger model than the target. It
-must fail an empty answer, "I don't know" and a confident answer to a different question.
-Validate against human labels (Cohen's kappa via `common.cohen_kappa`); well below ~0.8 means
-iterate the judge before trusting it. Judge cost is recorded separately.
+## LLM judges
+
+Code first; a judge only for semantics code cannot decide. Use an anchored rubric, separate
+criteria and structured verdicts with evidence, mapped to scores outside the model. Validate
+on independent labeled cases, including decisive errors, order/identity bias, equivalent
+wording, verbosity and instructions embedded in evaluated answers. Empty or generic
+abstention fails when an answer is required; justified abstention must pass when the contract
+requires it. Always-accept and always-hold judges must fail the appropriate controls.
+Report false passes/failures by criterion and stratum, with uncertainty. Agreement and
+Cohen's kappa can supplement these measures; no universal kappa cutoff or published agreement
+percentage validates a different task. Test reasoning or few-shot additions rather than
+enabling them by default. Judge cost is recorded separately.
 Use only an explicitly configured judge model; never upgrade Codex Luna automatically to
 satisfy this requirement. Without an independent validated judge, report that limitation
 rather than calling same-model judgments independent correctness.
+No judge runner is bundled. A task-specific integration must preserve verdicts/provenance
+for deterministic rescoring and invalidate grades when evaluated outputs or judge policy
+change; see [judge validation](evaluation-trust.md#validate-a-judge-against-the-decision-it-must-make).
 
 ## Validation and noise (`validate_eval.py`)
 
@@ -180,10 +203,12 @@ hook; do not remove it to hide incomplete references.
 
 Before the loop: null test (missing outputs score at the configured worst threshold), oracle
 test (reference-built outputs reach the configured optimum), corruption test, determinism,
-rescore of stored runs, two
-baseline runs for the noise floor, and a manual spot-check of the worst baseline items
-(read ~5-10: is the grader right, is the reference right?). If more than ~1 in 10 baseline
-failures are grader/reference errors, fix the eval first.
+rescore of stored runs, two baseline runs for the noise floor, and source-based spot-checks
+of baseline successes and failures. Select a bounded sample from the relevant risks; correct
+confirmed grader/reference defects before tuning against them. A targeted failure sample is
+not an estimate of the overall reference error rate. The script checks the presence of the
+spot-check note, not whether a human actually verified its contents. The oracle test checks
+scorer/reference consistency, not whether the reference itself is true.
 
 The two noise runs must be distinct run directories and each must cover exactly the full
 dev unit set. Metadata ids and output-row ids must be unique and complete; partial limits,
@@ -203,6 +228,9 @@ an item-independent band claimed 0.03. When a few units carry most items
 over more items per unit, and report unit-bootstrap intervals (`paired_items` gives `ci`). If the
 noise floor is not below the headroom, more rounds cannot show wins - enlarge dev, add repeats,
 or use a finer metric, and tell the user.
+These diagnostics do not establish a formal sequential-testing or release guarantee. The
+ledger's normal KEEP rule uses `min_delta`, guards and paired item improvements; it does not
+require a confidence interval excluding zero or correct for every adaptively tried candidate.
 
 Holdout diagnostics: `analyze_run.py` on a holdout run prints aggregates only (failure tags,
 reference->prediction confusion, failures-per-unit histogram). Those are allowed; ids and texts
@@ -246,6 +274,9 @@ and review that change.
 ## Naming numbers in reports
 
 - "accuracy" only against gold. Otherwise "agreement with <tier/model> reference".
+- New scorer templates use the neutral `reference_agreement` metric key. Existing custom
+  scorers are not rewritten automatically; when renaming an old `accuracy` metric, update
+  dependent guards/reporting, version the evaluation and rescore as above.
 - Automation (auto-decided) rate, schema-valid rate, self-agreement, model-model agreement:
   report them, but not as accuracy.
 - Report every outcome class against the original totals, including failed and excluded units.

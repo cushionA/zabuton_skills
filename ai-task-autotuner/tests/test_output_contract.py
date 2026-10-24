@@ -51,6 +51,25 @@ class OutputContractTest(unittest.TestCase):
         self.assertEqual(result["gate_failures"], [])
         self.assertEqual(self.scorer.flatten(self.unit, self.valid()), {"u|a": "pos", "u|b": "neg"})
 
+    def test_legitimate_abstention_stays_in_scope_without_rewarding_blanket_hold(self):
+        hold = {"status": "hold", "reason": "insufficient_evidence"}
+        match = {"status": "matched", "target_id": "t1"}
+        self.write_reference([{"key": "u|a", "label": hold}, {"key": "u|b", "label": match}])
+        correct = {"items": [{"key": "a", "label": hold}, {"key": "b", "label": match}]}
+        result = self.score(correct)
+        self.assertEqual(result["primary"], 1.0)
+        self.assertEqual(result["metrics"]["n_items"], 2)
+        self.assertEqual(result["gate_failures"], [])
+        self.assertEqual(result["metrics"]["reference_agreement"], 1.0)
+        self.assertNotIn("accuracy", result["metrics"])
+        blanket_hold = {"items": [{"key": "a", "label": hold}, {"key": "b", "label": hold}]}
+        self.assertEqual(self.score(blanket_hold)["primary"], 0.5)
+        missing_hold = {"items": [{"key": "b", "label": match}]}
+        result = self.score(missing_hold)
+        self.assertEqual(result["primary"], 0.5)
+        self.assertEqual(result["metrics"]["n_items"], 2)
+        self.assertTrue(result["gate_failures"])
+
     def test_malformed_output_or_items_never_crash_or_shrink_denominator(self):
         for output in (None, [], "text", 3, False, {}, {"items": None}, {"items": "rows"},
                        {"items": {}}, {"items": 2}, {"items": False}):

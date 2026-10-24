@@ -120,6 +120,7 @@ python -X utf8 -B -m unittest discover -s scraping-procedure-deck/evals -p "test
 - **異常・境界・拡張を設計する:** `review/design_contracts.json` に入力構造・業務／処理／呼出し単位、前提、検査の適用条件・期待関係・判定根拠を記録する。正当だが難しい入力と不正入力を分け、件数・属性・関係・偏り・組み合わせの変化を検討する。定義と任意の `review/probes/` はレビューの対象として固定し、実行結果は別に保存する。定義の形式検査だけで試験済みとは扱わない。
 - **問題の表現も改善する:** 共通情報の抽出、候補絞り込み、属性対応表、分割・融合、コードでの結合を比較する。例えばSKUでは商品単位の対応表から実在するSKUだけを結合し、属性依存や条件付き対応を検査する。元モデルとの不一致だけをバグとせず、同じ業務上の要求と評価対象で品質を比較する。必要な出力量も含めて規模と入出力トークンの増え方を測る。
 - **評価は固定:** 正解ラベルがなければ設定した参照モデルで参照を作り、「正答率」ではなく「参照との一致率」と呼ぶ。採点器・参照・指標の方向や閾値・ガードを変えた場合は再採点・再検証する。検証にはdev全件を含む別々の2実行が必要。入力・補助データの内容や役割・順序・対象範囲、読み込み処理、データ分割が変われば出力から測り直す。古い出力の再採点では新データの測定にできない。
+- **正解と採点器の信頼性も確認:** モデル同士の一致を独立した正解とは扱わず、一致した例も抽出方法を記録して検証する。正当な保留と無回答・除外を区別し、採点器の誤合格、順序・長文・回答内の命令による偏りを検査する。自動処理率と誤り率の分母を固定し、閾値は開発・校正用データで選ぶ。最終評価の繰り返し利用や、少数例で誤りゼロだったことを精度保証にしない。
 - **出力を検証:** 重複key・不明ID・不正なitems・ラベル欠落はハードゲート違反とし、期待項目を採点の分母に残す。`items: null`でクラッシュしたり、重複の最後の値だけで満点にしたりしない。正当なnull・false・0などのラベルは維持し、boolを数値と同一視しない。初回baselineにも制約を適用し、KEEPの上書きで迂回させない。
 - **最終評価用データを保護:** 実際に読み込むIDで判定し、全件実行・別名の分割・AIなしの候補も回数制限の対象にする。実行目的の変更で迂回できない。同じ候補ID・内容・実効設定の繰り返しは1回分として扱う。最終評価用の参照作成はレビュー後の採点しない準備処理として分ける。
 - **改善ループ:** 1実験＝1仮説を事前登録し、実験IDと実行候補の一致を確認する。候補の内容とbackend・モデル・effort・同時実行数などの実効設定は初回の本測定で固定し、変更は新しい候補で測る。異なる設定の結果を反復として混ぜない。指標の最大化・最小化に合わせて目標到達と品質の許容境界を判定し、揺らぎを超えた改善だけ採用する。同じ方向の試行や行き詰まりには別の手段・新しい視点を求める。
@@ -154,7 +155,7 @@ python ai-task-autotuner/scripts/ledger.py status work/ws
 - `claude -p` では Haiku の思考を完全には無効化できない（effort lowで最小化）。実API（`backend: api`、`anthropic` SDKと認証情報が必要）では対応モデルで思考を無効化できる。Claudeのライブ呼び出しも今回は再実行していない。実機ベンチマーク前に認証を確認し、最初に1件だけ試すこと。
 - スクリプトは Python 標準ライブラリのみ。Windows でも動くよう、プロンプトは標準入力、システムプロンプトはファイルで渡す。
 
-[スキルの指示](ai-task-autotuner/SKILL.md) / [データ監査](ai-task-autotuner/references/audit.md) / [タスクレビュー](ai-task-autotuner/references/task-review.md) / [前提・条件付き検査・構造変更](ai-task-autotuner/references/robustness.md) / [評価設計](ai-task-autotuner/references/evaluation.md) / [改善ループ](ai-task-autotuner/references/loop.md) / [タスク設計](ai-task-autotuner/references/task-design.md)
+[スキルの指示](ai-task-autotuner/SKILL.md) / [データ監査](ai-task-autotuner/references/audit.md) / [タスクレビュー](ai-task-autotuner/references/task-review.md) / [前提・条件付き検査・構造変更](ai-task-autotuner/references/robustness.md) / [評価設計](ai-task-autotuner/references/evaluation.md) / [正解・採点器・合格基準の信頼性](ai-task-autotuner/references/evaluation-trust.md) / [改善ループ](ai-task-autotuner/references/loop.md) / [タスク設計](ai-task-autotuner/references/task-design.md)
 
 ```powershell
 python -B -m unittest discover -s ai-task-autotuner/tests

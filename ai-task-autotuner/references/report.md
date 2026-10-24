@@ -24,6 +24,9 @@ reported by the backend" - never fill gaps with estimates presented as measureme
    and grouping, noise floor, validation checks. What may be called accuracy and what not.
    Link the reviewed policy in `eval/eval_spec.md` and the actual reference-build records in
    `eval/reference_provenance.json`; keep run metadata out of the frozen policy document.
+   State human/independent verification scope, sampling method and unresolved/excluded cases.
+   For model judges report calibration and independent validation, false passes/failures,
+   bias controls and actual judge cost. Separate targeted stress results from population estimates.
    Link `review/design_contracts.json` and separate execution evidence: selected conditional
    tests, assumptions, oracle/relation, tolerance and passed/failed/inconclusive/not-run status.
    Explain material non-applicability. Definition validation is not execution or correctness.
@@ -35,6 +38,9 @@ reported by the backend" - never fill gaps with estimates presented as measureme
    Report confirmed rare contract failures separately from aggregate score changes; severity
    is not determined by a p-value. A stage-oracle probe is diagnostic evidence under an
    intervention, not proof of the cause of every end-to-end error.
+   Define automatic-decision coverage and error denominators, false-accept/reject/hold costs,
+   threshold-selection data and final evaluation scope. State the assumptions and confidence
+   level for any error-rate bound; zero observed errors is not zero population risk.
 7. **Time** - run wall time, sum of unit times, per unit and per item (state which is an
    apportioned average and which is a measured per-call latency), median/p90/slowest units,
    concurrency, cold vs warm cache, retries and timeouts.

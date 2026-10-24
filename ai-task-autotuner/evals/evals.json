@@ -384,8 +384,99 @@
         "boundary_baseline": 1.0,
         "boundary_candidate": 0.0
       }
+    },
+    {
+      "id": 8,
+      "name": "evaluation-policy-abstention-denominators-and-release-evidence",
+      "mode": "offline_design",
+      "prompt": "これはオフラインの評価設計レビューです。新しいモデル/API呼び出しや有料ベンチマークはせず、FIXTURE_ROOT/evaluation-policy.json を読み、業務要件に沿った採点基準、品質指標、合格判断、今後の実験手順を日本語で具体化してください。既存の評価計画案もレビューし、採用できる点と変更が必要な点を根拠とともに説明してください。各controlの期待判定と、与えられた集計から計算できる数値を示してください。必要ならローカルの決定的な計算は可。既知の事実、設計上の仮定、未測定・未確定事項を区別し、実際のモデル測定や人手検証を行ったとは主張しないでください。",
+      "files": [
+        "fixtures/evaluation-policy.json"
+      ],
+      "expected_output": "A policy-grounded evaluation plan that preserves legitimate abstentions and declared denominators, distinguishes conditional risk from scope-wide errors, checks rare-event release evidence, and separates development, calibration, representative validation and stress testing. Reference agreement is not independent correctness.",
+      "assertions": [
+        {
+          "id": "8.1",
+          "criterion": "Accepts answerable_correct and insufficient_hold as policy-compliant; rejects answerable_empty and insufficient_guess. Does not equate a valid hold with a missing response.",
+          "critical": true
+        },
+        {
+          "id": "8.2",
+          "criterion": "Keeps all 1000 valid requests, including insufficient-evidence holds, in the business scope; reports the 20 predeclared invalid exclusions against 1020 received separately. Does not silently drop hard cases after observing errors.",
+          "critical": true
+        },
+        {
+          "id": "8.3",
+          "criterion": "Computes automation coverage=400/1000=0.4, error among automatic matches=4/400=0.01, and wrong automatic matches per in-scope request=4/1000=0.004, with explicit denominators.",
+          "critical": true
+        },
+        {
+          "id": "8.4",
+          "criterion": "Computes total loss=4*1000+600*2=5200 and loss per in-scope request=5.2. Does not infer overall policy correctness or optimal threshold from the unknown hold correctness and one operating point.",
+          "critical": false
+        },
+        {
+          "id": "8.5",
+          "criterion": "Rejects certification from zero errors in 100 automatic matches: under the stated IID/frozen-rule assumptions, the one-sided 95% binomial upper bound is about 0.0295. For a zero-error planning scenario, at least 299 independent automatic matches are needed for an upper bound <=0.01; this is not an unconditional sample-size rule.",
+          "critical": true
+        },
+        {
+          "id": "8.6",
+          "criterion": "Keeps scenario A and scenario B separate, and distinguishes stress-set diagnostics from representative production risk; does not report the unweighted enriched stress mean as production accuracy without deployment weights.",
+          "critical": true
+        },
+        {
+          "id": "8.7",
+          "criterion": "Selects candidate prompts/thresholds on development or calibration data before a sealed final evaluation; rejects repeatedly selecting the winner on the same holdout. Preserves product-family grouping and records reuse if a previously inspected set becomes development data.",
+          "critical": true
+        },
+        {
+          "id": "8.8",
+          "criterion": "Does not certify same-family model agreement as correctness; proposes provenance, source-grounded adjudication and independent checks of agreements as well as disagreements, without inventing human-validated labels.",
+          "critical": true
+        },
+        {
+          "id": "8.9",
+          "criterion": "Separates coverage, conditional risk, business loss and known hard-contract failures; does not let a mean score or small p-value override an observed identity-contract violation.",
+          "critical": true
+        },
+        {
+          "id": "8.10",
+          "criterion": "Treats sample counts and test outcomes as synthetic inputs and calculations only; labels unperformed judge validation and production measurements as unperformed, with sample independence and reference reliability as assumptions.",
+          "critical": false
+        }
+      ],
+      "naive_failure_modes": [
+        "Every hold receives zero, including required abstentions, while difficult inputs are removed from the denominator.",
+        "The 0.4% scope-wide wrong-match frequency is presented as the 1% conditional risk among automatic matches.",
+        "Zero of 100 errors is claimed to prove a risk below 1%.",
+        "Stress enrichment and adaptive holdout reuse produce an optimistic production-quality claim.",
+        "Agreement between related reference models is relabeled as human-verified correctness."
+      ],
+      "expected_fixture_results": {
+        "scorer_controls": {
+          "answerable_correct": "policy_compliant",
+          "answerable_empty": "invalid_missing_response",
+          "insufficient_hold": "policy_compliant_hold",
+          "insufficient_guess": "unsupported_auto_match"
+        },
+        "received_requests": 1020,
+        "predeclared_invalid_exclusions": 20,
+        "in_scope_requests": 1000,
+        "automation_coverage": 0.4,
+        "error_given_automatic_match": 0.01,
+        "wrong_automatic_matches_per_in_scope_request": 0.004,
+        "hold_rate": 0.6,
+        "total_loss": 5200,
+        "loss_per_in_scope_request": 5.2,
+        "overall_policy_correctness": "not_identifiable_from_given_hold_counts",
+        "pilot_upper_error_bound_one_sided_95": 0.029513049607039932,
+        "pilot_release_requirement_met": false,
+        "minimum_zero_error_sample_for_upper_bound_at_most_0_01": 299,
+        "stress_set_production_accuracy": "not_identifiable_without_representative_sampling_or_deployment_weights"
+      }
     }
   ],
   "schema_version": 2,
-  "evaluation_notes": "See README.md. Evals 1-2 need external data and separately authorized live execution. Evals 3-7 are offline design probes, not live model benchmark results. Prompts and fixture files go to candidates; expected outputs, assertions, and known issue IDs are grader-only."
+  "evaluation_notes": "See README.md. Evals 1-2 need external data and separately authorized live execution. Evals 3-8 are offline design probes, not live model benchmark results. Prompts and fixture files go to candidates; expected outputs, assertions, and known issue IDs are grader-only."
 }

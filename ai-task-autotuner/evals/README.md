@@ -15,8 +15,9 @@ a target pipeline, or an external model. No performance results are included her
 | 5 | Offline design | Preserve evidence and meaning through extraction, chunk boundaries, negation, and amendments. |
 | 6 | Offline design | Distinguish valid invariance from required-change controls and handle unknown domains. |
 | 7 | Offline design | Detect correlated false references and rare-case regressions without inventing an oracle. |
+| 8 | Offline evaluation design | Distinguish legitimate holds, scoring errors, business denominators, rare-event release evidence, and adaptive selection bias. |
 
-IDs 3–7 require only the supplied JSON fixtures and local deterministic inspection.
+IDs 3–8 require only the supplied JSON fixtures and local deterministic inspection.
 The design agent must not run target-model calls, upgrade a model, start an external
 benchmark, or claim those measurements occurred. Local calculations are permitted.
 If an independent reviewer is used in an authorized skill evaluation, record that
@@ -44,7 +45,10 @@ must not be supplied to a production inference stage as if they were input facts
 Expected facts do not depend on a second model agreeing with the first. They follow
 from explicit finite rules: equality and conditional dictionaries in case 3,
 integer arithmetic in case 4, binding-date precedence and source text in case 5,
-the stated ticket policy in case 6, and strict types plus age thresholds in case 7.
+the stated ticket policy in case 6, strict types plus age thresholds in case 7, and
+the business rules, arithmetic and conditional binomial calculation in case 8.
+Case 8's zero-error bound assumes an IID representative sample of automatic decisions
+from a rule fixed before sampling; its sample size is not a universal evaluation budget.
 An evaluator should inspect these derivations before using the suite. A model may
 help review an explanation, but cannot redefine these facts by voting. New cases
 that need domain judgment require separately established labels or must be marked
@@ -111,7 +115,10 @@ Track their usefulness separately so verbosity does not inflate issue counts.
 
 Useful negative controls include legitimate no-matches and ambiguity in case 3,
 many-match output in case 4, quoted negation in case 6, and the unresolved external
-search disagreement in case 7. A reviewer must not flag these simply for differing
+search disagreement in case 7. Case 8 includes a justified hold that must satisfy its
+decision policy, plus an empty response on an answerable case that must fail. Its
+predeclared invalid exclusions are reported separately from the valid business scope.
+A reviewer must not flag these simply for differing
 from a preferred pattern. Conversely, an always-null/always-unknown pipeline must
 fail the positive and required-change controls.
 

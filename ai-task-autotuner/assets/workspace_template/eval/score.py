@@ -139,7 +139,8 @@ def score(units, outputs, split):
     n = len(items)
     acc = sum(i["score"] for i in items) / n if n else 0.0
     answered = sum(1 for i in items if "missing" not in i["tags"]) / n if n else 0.0
-    return {"primary": acc, "metrics": {"accuracy": acc, "answered": answered, "n_items": n},
+    # Matching a supplied reference does not establish that the reference is correct.
+    return {"primary": acc, "metrics": {"reference_agreement": acc, "answered": answered, "n_items": n},
             "items": items, "gate_failures": gate}
 
 

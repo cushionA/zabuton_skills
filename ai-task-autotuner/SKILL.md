@@ -57,6 +57,9 @@ unattended for a long time, so state lives on disk and the conversation stays sm
 - **Name numbers honestly.** Agreement with a model-made reference is not accuracy; the
   auto-decided rate, self-consistency and schema validity are not accuracy either. Report
   exclusions and failures against the original totals; never drop hard cases to raise a score.
+  Preserve justified holds, audit agreed references too, and calibrate any judge independently.
+  Define error denominators and choose thresholds before final evaluation; see
+  [evaluation trust](references/evaluation-trust.md) when those risks apply.
 - **The best pipeline, not the most AI.** Code may normalize, parse, prune candidates, decide
   easy items and validate outputs; the model handles what needs judgment. Always measure a
   no-model baseline when one is plausible. If code alone matches the model within noise, that is
