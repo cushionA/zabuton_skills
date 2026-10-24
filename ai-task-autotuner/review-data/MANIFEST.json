@@ -2,7 +2,7 @@
   "version": 1,
   "prepared_on": "2026-10-20",
   "timezone": "Asia/Tokyo",
-  "source": "Original user uploads in this chat, copied byte-for-byte",
+  "source": "Original user uploads in this chat, copied byte-for-byte. The test-data archive and the product titles in one evidence file were removed from the public repository on 2026-10-24.",
   "archives": [
     {
       "path": "ai-task-autotuner-review-20261019.zip",
@@ -10,7 +10,8 @@
       "size_bytes": 375219,
       "file_count": 170,
       "uncompressed_bytes": 738343,
-      "root": "ai-task-autotuner-review-20261019"
+      "root": "ai-task-autotuner-review-20261019",
+      "in_repository": true
     },
     {
       "path": "ai-task-autotuner-testdata-20261019.zip",
@@ -18,7 +19,9 @@
       "size_bytes": 21336169,
       "file_count": 795,
       "uncompressed_bytes": 100113313,
-      "root": "ai-task-autotuner-testdata-20261019"
+      "root": "ai-task-autotuner-testdata-20261019",
+      "in_repository": false,
+      "note": "Removed from the public repository: it contains full prompts/responses built from marketplace product data and is marked 'do not publish'. Keep it outside the repository; the checksum identifies the original when it is supplied separately."
     }
   ],
   "evidence": [
@@ -39,8 +42,11 @@
     },
     {
       "path": "evidence/raw-review-summary-20261019.json",
-      "size_bytes": 17834,
-      "sha256": "81db2d3106f6a020e67e6ec8589756d73f6ca97229f8e6316ac4121ec91bea3a"
+      "size_bytes": 14979,
+      "sha256": "c63b39cf964f4d450647e7b9ecad42c8c8db67f4d0aeb4c2394960d0f8a80ff5",
+      "original_size_bytes": 17834,
+      "original_sha256": "81db2d3106f6a020e67e6ec8589756d73f6ca97229f8e6316ac4121ec91bea3a",
+      "redaction": "10 marketplace product titles replaced; all other fields unchanged."
     },
     {
       "path": "evidence/raw-review-coverage-summary.json",
@@ -87,7 +93,8 @@
     "path": "ai-task-autotuner-testdata-20261019/inputs/sku-product-volume-normal-v1.zip",
     "sha256": "d3c2ddcd86da0d110dd51f37f18eb4a27143a1bde7ee3d08c8b5c95e5a2462f2",
     "file_count": 538,
-    "extract_to": "ai-task-autotuner-testdata-20261019/inputs/sku-normal-v1"
+    "extract_to": "ai-task-autotuner-testdata-20261019/inputs/sku-normal-v1",
+    "in_repository": false
   },
   "content_check": {
     "provider_private_keys": 0,

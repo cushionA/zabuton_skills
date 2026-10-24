@@ -1,20 +1,32 @@
 # Astra向けレビュー資料・データ
 
 2026-10-20の「データとハンドオフpush」という依頼に合わせた引き継ぎ一式。
-現行コードの説明は [ASTRA_HANDOFF.md](../ASTRA_HANDOFF.md) を先に読む。
+現行コードの説明は [ASTRA_HANDOFF.md](ASTRA_HANDOFF.md) を先に読む。初期開発の記録は
+[HANDOFF.md](HANDOFF.md)。どちらも当時の記録で、現行の手順は [../SKILL.md](../SKILL.md) と
+`../tests/` を正とする。
 
 ## 同梱物
 
 | ファイル | 内容 | サイズ |
 |---|---|---:|
 | `ai-task-autotuner-review-20261019.zip` | 元のレビュー資料。旧スキルのsnapshot、タスク構造2件、レポート | 375,219 bytes |
-| `ai-task-autotuner-testdata-20261019.zip` | 元の試験データ、案内文、実験ワークスペース、参照、呼び出しログ | 21,336,169 bytes |
 | `MANIFEST.json` | 元ZIPと証拠ファイルのSHA-256、ファイル件数、内包ZIPの情報 | — |
 | `evidence/` | 修正前の最小再現結果、実データの再計算要約、当時の再現スクリプト | — |
+| `HANDOFF.md`, `ASTRA_HANDOFF.md` | 開発時の引き継ぎ記録（2026-10-24にスキル直下から移動） | — |
 
-元のアップロード2本はバイト単位で変更していない。testdata ZIPには795ファイルがあり、
-その中の元データZIPにさらに538ファイルが入っている。両方を展開すると約164MB必要。
-元資料内の「公開しない」という旧保管方針などの記述も原本のまま保存している。
+レビュー資料ZIPはバイト単位で変更していない。商品データ・行ごとの判定・参照・呼び出しログは
+元から含まない。
+
+## 公開リポジトリに入れないもの
+
+試験データ `ai-task-autotuner-testdata-20261019.zip`（21,336,169 bytes、795ファイル）は
+2026-10-24に公開リポジトリから外した。実商品データから作った全プロンプト・応答（`calls.jsonl`）、
+店頭ページ、実験ワークスペースを含み、原本に「do not publish」と書かれているため。
+必要なときはリポジトリの外で受け渡し、`MANIFEST.json` のSHA-256で原本か確かめる。
+`.gitignore` で再追加を防いでいる。
+
+同じ理由で、`evidence/raw-review-summary-20261019.json` の商品タイトル10件を伏せ字にした。
+他の値は変えていない。元のSHA-256とサイズは `MANIFEST.json` に残している。
 
 ## 展開
 
@@ -23,19 +35,17 @@
 
 ```sh
 python -m zipfile -t ai-task-autotuner/review-data/ai-task-autotuner-review-20261019.zip
-python -m zipfile -t ai-task-autotuner/review-data/ai-task-autotuner-testdata-20261019.zip
 python -m zipfile -e ai-task-autotuner/review-data/ai-task-autotuner-review-20261019.zip ai-task-autotuner/review-data/unpacked
-python -m zipfile -e ai-task-autotuner/review-data/ai-task-autotuner-testdata-20261019.zip ai-task-autotuner/review-data/unpacked
-python -m zipfile -e ai-task-autotuner/review-data/unpacked/ai-task-autotuner-testdata-20261019/inputs/sku-product-volume-normal-v1.zip ai-task-autotuner/review-data/unpacked/ai-task-autotuner-testdata-20261019/inputs/sku-normal-v1
 ```
 
-任意の別ディレクトリに展開してもよい。Linuxでは `sha256sum`、PowerShellでは
-`Get-FileHash -Algorithm SHA256` の結果を `MANIFEST.json` と照合できる。
+別途受け取った試験データZIPは、リポジトリの外に置いて展開する。中の元データZIP
+（`inputs/sku-product-volume-normal-v1.zip`）も展開すると、合わせて約164MB必要。
+Linuxでは `sha256sum`、PowerShellでは `Get-FileHash -Algorithm SHA256` の結果を
+`MANIFEST.json` と照合できる。
 
 - レビュー資料: `unpacked/ai-task-autotuner-review-20261019/`
-- 試験ワークスペース: `unpacked/ai-task-autotuner-testdata-20261019/iteration-1/`
-- 元データ: `unpacked/ai-task-autotuner-testdata-20261019/inputs/sku-normal-v1/`
-- 元の課題文: `unpacked/ai-task-autotuner-testdata-20261019/inputs/brief_sku.md`
+- 試験データZIPの中: 試験ワークスペースは `iteration-1/`、元データは `inputs/` の内包ZIP、
+  元の課題文は `inputs/brief_sku.md`
 
 ## 読み分け
 

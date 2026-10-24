@@ -2,8 +2,11 @@
 
 > 2026-10-20追記: 本書は初期開発時の記録です。今回のレビュー・修正・CLI切り替えと
 > 未解決点は [ASTRA_HANDOFF.md](ASTRA_HANDOFF.md)、元データと証拠は
-> [review-data/README.md](review-data/README.md) を参照してください。以下のテスト件数・
+> [README.md](README.md) を参照してください。以下のテスト件数・
 > 既定値・データの保管先は当時の情報です。
+>
+> 2026-10-24追記: main への取り込み時に、本書をスキル直下から `review-data/` に移しました。
+> 試験データZIPは公開リポジトリから外しています（[README.md](README.md) 参照）。
 
 2026-10-18〜19 の作業の引き継ぎ。main に取り込むときは、このファイルを残すか削除するか決めること（スキルの動作には関係しない）。
 
@@ -17,7 +20,7 @@
 4. 改善ループ（精度 → 効率・構造）
 5. 最終評価と成果物
 
-API の代わりに `claude -p` を使う（既定は Haiku、思考は最小）。使い方は [README の節](../README.md#ai-task-autotuner)、指示は [SKILL.md](SKILL.md) にある。
+API の代わりに `claude -p` を使う（既定は Haiku、思考は最小）。使い方は [README の節](../../README.md#ai-task-autotuner)、指示は [SKILL.md](../SKILL.md) にある。
 
 ## 2. 依頼内容と反映先
 
@@ -53,7 +56,7 @@ ai-task-autotuner/
   assets/workspace_template/  charter.json、audit/checks.py、eval/dataset.py・score.py、c000-baseline
   tests/                    単体テスト・結合テスト 15件（偽のモデルで全工程を通す）
   evals/evals.json          実データでの試験用の依頼文 2件
-  HANDOFF.md                このファイル
+  HANDOFF.md                このファイル（現在は review-data/ に移動）
 ```
 
 テスト: `python -B -m unittest discover -s ai-task-autotuner/tests`（2026-10-19 時点で 17件成功）。
