@@ -38,15 +38,52 @@ worse than a hold. Make the primary metric reward correct decisions, and put a h
 the false-accept rate (e.g. `{"metric": "false_accept_rate", "max": 0.02}`); otherwise the
 loop learns to guess. Report coverage (share auto-decided) separately; it is not accuracy.
 
+### Metric direction and quality bounds
+
+Set `primary.direction` to `max` when higher is better and `min` for error or loss. Quality
+targets use `>=` for max and `<=` for min. The existing `quality_floor` field is a quality
+bound: a lower floor for max, an upper ceiling for min. Its automatic value is incumbent
+minus `min_delta` for max, incumbent plus `min_delta` for min.
+
+`primary.item_direction` describes the individual `items[].score` values used in paired
+comparisons. It defaults to `max` for correctness scores, independently of the primary
+metric. Use `min` when item scores are losses. For example, an error-rate headline with
+0/1 correctness items uses primary `min` and item `max`; per-item error indicators use both
+`min`. Report item-score improvement intervals as such, not as primary-metric intervals.
+
+Validator thresholds follow the primary direction:
+
+| Direction | Missing-output threshold | Oracle threshold | Best attainable value |
+|---|---|---|---|
+| `max` | `null_max`, default 0 | `oracle_min`, default 0.999 | `optimum`, otherwise legacy `ceiling` or 1 |
+| `min` | `null_min`, default 1 | `oracle_max`, default 0.001 | `optimum`, default 0 |
+
+The min defaults assume normalized error. Set explicit finite thresholds and `optimum` for
+another scale. An oracle must meet its threshold without scoring beyond the declared
+optimum; the oracle threshold must be better than the missing-output threshold. Headroom is
+the distance from the observed primary to that optimum in the configured direction.
+
 ## Hard gates and failure classes
 
 - Hard gates in `score()` -> `gate_failures`: output schema, every required item answered
   exactly once, only real ids referenced (no fabricated keys/rows). Any gate failure makes the
-  run invalid for keeping.
+  run invalid for keeping. These checks and configured guards also apply to the first
+  baseline; `--override keep` cannot bypass hard measurement constraints or guards.
 - Cover the whole output contract: type and null errors, duplicates, invalid evidence ids,
   required add-on conditions and unresolved choices. Test a correct class/id with missing or
   contradictory conditions; it must not silently receive full task success. If only class/id
   agreement is measured, name it that way and report the other requirements separately.
+- The template rejects malformed output objects, non-list or null `items`, malformed rows,
+  missing labels, duplicate keys and unknown unit/item ids. A malformed unit receives zero
+  across its expected scored rows plus hard-gate failures; it cannot gain credit from a
+  duplicate's last value. Missing required rows remain in the denominator. A present JSON
+  label may legitimately be `null`, `false`, `0` or a JSON container; missing the label field
+  is a different case. JSON booleans remain distinct from numbers: `true` is not label `1`,
+  nor `false` label `0`, including inside arrays or objects. Explicit reference exclusions
+  remain unscored and may be omitted.
+- Reference creation uses strict `flatten`: malformed or duplicate predictions refuse the
+  merge before existing references are rewritten. Well-formed partial output is allowed
+  there, but expected-item coverage must still pass after reference adjudication.
 - **System failures** (refusal, unparseable or truncated output, exception in the pipeline)
   are scored as wrong - never dropped.
 - **Harness failures** (timeouts, rate limits, CLI crash) are missing data. The runner marks
@@ -141,11 +178,22 @@ reported separately. Missing/malformed reference records must fail coverage rath
 shrink the expected total or scoring denominator. Genuinely reference-free tasks may omit the
 hook; do not remove it to hide incomplete references.
 
-Before the loop: null test (missing outputs score at the floor), oracle test (reference-built
-outputs reach the ceiling), corruption test, determinism, rescore of stored runs, two
+Before the loop: null test (missing outputs score at the configured worst threshold), oracle
+test (reference-built outputs reach the configured optimum), corruption test, determinism,
+rescore of stored runs, two
 baseline runs for the noise floor, and a manual spot-check of the worst baseline items
 (read ~5-10: is the grader right, is the reference right?). If more than ~1 in 10 baseline
 failures are grader/reference errors, fix the eval first.
+
+The two noise runs must be distinct run directories and each must cover exactly the full
+dev unit set. Metadata ids and output-row ids must be unique and complete; partial limits,
+unknown units, duplicate rows and passing the same run twice cannot validate a smaller or
+artificially identical sample. Stored item scores must reproduce from the outputs as well as
+the stored primary; noise cannot rely on edited or reduced item evidence. Repeats need the
+same item set and stable unit assignments so clustered comparisons keep the same sampling
+units. The same requirements apply to `--renoise`. When oracle
+outputs are available, a supplied `corrupt` hook must worsen the primary in its configured
+direction; a broken hook fails validation rather than producing an optional warning.
 
 `min_delta` = max(paired noise band of two identical runs, one item). The band is computed
 over units (all items of a unit together), because items inside a unit flip together: in one
@@ -168,12 +216,14 @@ Renaming the purpose or split does not reset the cap.
 ## Changing the eval mid-loop
 
 Allowed only to fix a real grader/reference error, never because a candidate "should" score
-higher. The eval hash includes the source-data fingerprint as well as loader, splits, scorer
-and references. Each run pins a separate generation-time `meta.data_hash`: input and auxiliary
+higher. The eval hash includes the source-data fingerprint, loader, splits, scorer,
+references, the full `primary` contract and guards. Changing direction, thresholds or guards
+therefore invalidates the old validation. Each run pins a separate generation-time
+`meta.data_hash`: input and auxiliary
 file bytes, source roles and order, scope, loader and splits. File locations are excluded so
 moving identical data preserves identity; directory-relative contents still matter.
 
-For scorer/reference-only changes: fix, note it in the journal (reference corrections also in
+For scorer/reference or metric-contract-only changes: fix, note it in the journal (reference corrections also in
 `eval/reference_provenance.json`), `run_experiment.py --rescore` every run used in decisions,
 re-run `validate_eval.py`, and re-check whether the best candidate is still the best. The
 ledger refuses decisions on stale runs. Update `eval_spec.md` only if the task/evaluation

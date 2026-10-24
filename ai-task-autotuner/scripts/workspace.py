@@ -5,7 +5,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import MODEL_ALIASES, digest, hash_paths, read_json, read_jsonl, sha256_file  # noqa: E402
+from common import MODEL_ALIASES, digest, hash_paths, read_json, read_jsonl  # noqa: E402
+from quality_gate import source_manifest  # noqa: E402
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 
@@ -31,7 +32,9 @@ def eval_paths(ws):
 
 def eval_hash(ws):
     """Fingerprint of current source data and the files defining its measurement."""
-    return digest({"eval": hash_paths(eval_paths(ws), base=ws), "data_hash": data_fingerprint(ws)})
+    ch = charter(ws)
+    return digest({"eval": hash_paths(eval_paths(ws), base=ws), "data_hash": data_fingerprint(ws),
+                   "primary": ch.get("primary", {}), "guards": ch.get("guards", [])})
 
 
 def data_snapshot(ws):
@@ -46,18 +49,10 @@ def data_snapshot(ws):
     ws = Path(ws)
     data = charter(ws).get("data", {})
 
-    def source(path):
-        p = Path(path)
-        if p.is_file():
-            return {"kind": "file", "sha256": sha256_file(p)}
-        if p.is_dir():
-            return {"kind": "directory", "files": hash_paths([p], base=p)}
-        # Missing sources must differ from the previous readable snapshot.
-        return {"kind": "missing"}
-
+    sources = source_manifest(ws)
     return {"version": 1,
-            "inputs": [source(p) for p in data.get("inputs", [])],
-            "aux": [source(p) for p in data.get("aux", [])],
+            "inputs": [{k: v for k, v in source.items() if k != "path"} for source in sources["inputs"]],
+            "aux": [{k: v for k, v in source.items() if k != "path"} for source in sources["aux"]],
             "scope": {k: v for k, v in data.items() if k not in ("inputs", "aux")},
             "units": hash_paths([ws / "eval" / "dataset.py", ws / "eval" / "splits.json"], base=ws)}
 

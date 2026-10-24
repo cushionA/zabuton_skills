@@ -28,18 +28,29 @@ TRANSIENT_MARKERS = (
     "timed out", "connection", "stream disconnected", "502", "503", "504",
     "try again",
 )
+AUTH_MARKERS = (
+    "401 unauthor", "status=401", "http 401", "http error: 401",
+    "invalid_api_key", "authentication_error", "invalid authentication",
+    "access token could not be refreshed", "refresh token", "token has expired",
+    "please sign in", "sign in again", "please log in", "not logged in",
+)
 # These switches are available in Codex CLI 0.159.2. Config loading and rules
 # loading are separately disabled below; disabling features is not a substitute
 # for checking the emitted items for unexpected tool use.
 DISABLED_FEATURES = (
     "shell_tool", "unified_exec", "view_image", "multi_agent", "multi_agent_v2",
-    "apps", "plugins", "hooks", "skill_search", "code_mode", "code_mode_host",
+    "apps", "plugins", "hooks", "skill_search", "code_mode",
     "browser_use", "browser_use_external", "computer_use", "image_generation",
     "memories", "sleep_tool", "workspace_dependencies", "tool_suggest",
     "in_app_browser", "in_app_local_automation", "remote_plugin",
 )
 ISOLATION_CONFIG = (
     'approval_policy="never"', 'web_search="disabled"', 'mcp_servers={}',
+    # The CLI initializes this runtime even when code_mode is disabled. Turning
+    # the host off emits a startup error before inference. Keep the runtime
+    # available, while code_mode and all model-visible tools remain disabled.
+    # A local-provider probe on 0.159.2 verified that the request has tools: [].
+    'features.code_mode_host=true',
     'project_doc_max_bytes=0', 'skills.include_instructions=false',
     'include_environment_context=false', 'include_apps_instructions=false',
     'include_collaboration_mode_instructions=false',
@@ -137,6 +148,10 @@ def _events(stdout):
 
 def _error_record(message, **fields):
     lower = message.lower()
+    # CLI auth failures can mention websocket connections or "try again" in
+    # their guidance. They require an account action, not transport retries.
+    if any(marker in lower for marker in AUTH_MARKERS):
+        return _failure("harness", message, **fields)
     if any(marker in lower for marker in QUOTA_MARKERS):
         return _failure("quota", message, **fields)
     transient = any(marker in lower for marker in TRANSIENT_MARKERS)

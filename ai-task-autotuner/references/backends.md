@@ -34,12 +34,19 @@ are parsed for the final answer and usage; any attempted tool event makes the ca
 closed rather than accepting an answer produced with tools. This is a one-shot request, not
 a continuation of the author's chat.
 
-Codex 0.159.2 options were inspected and adapter tests use mocked events. Tiny live Luna
-requests were attempted, but authentication refresh failed with HTTP 401 before a successful
-model response. This managed installation also emitted a Code Mode host-disabled startup
-diagnostic. Error-containing turns are rejected; that startup configuration still needs
-verification after authentication is restored. Luna execution remains unverified; Claude
-live calls were not re-run here.
+Codex 0.159.2 was exercised against a local fake Responses server using the actual CLI.
+The request exposed `tools: []`, a normal streamed final answer was accepted and usage was
+read from the CLI events. The adapter enables only `features.code_mode_host`, which the CLI
+initializes at startup, while `code_mode` and model-visible tool features stay disabled.
+This removes the host-disabled startup error without ignoring error events or enabling model
+tool use. Provider error responses are still failures.
+
+Tiny live Luna requests were attempted, but authentication refresh failed with HTTP 401
+before a successful model response. The final one-attempt smoke request after the startup fix
+no longer emitted the Code Mode startup error and reported `auth_required: true`.
+Authentication errors are non-retryable even when the
+diagnostic also mentions connection failures or trying again. No login or credential settings
+were changed. Actual Luna execution remains unverified; Claude live calls were not re-run here.
 Verify authentication and smoke one unit before a benchmark. Flags and event schemas may change.
 
 - Default model is Luna (`gpt-6-luna`), effort `low`. Neither `thinking: "off"` nor an explicit

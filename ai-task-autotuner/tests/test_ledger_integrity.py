@@ -223,10 +223,10 @@ class LedgerIntegrityTest(unittest.TestCase):
                 self.assertEqual(decision["decision"], "discard")
 
     def test_guard_metric_missing_in_a_repeat_is_missing_for_whole_pool(self):
-        self.baseline(metrics={"error_rate": 0.0})
         ch = workspace.charter(self.ws)
         ch["guards"] = [{"metric": "error_rate", "max": 0.1}]
         common.write_json(self.ws / "charter.json", ch)
+        self.baseline(metrics={"error_rate": 0.0})
         self.measured("E002", "c001-test", cost=0.0, metrics={"error_rate": 0.0})
         self.measured("E002", "c001-test", cost=0.0, tag="r2")
         decision = self.decide("E002")

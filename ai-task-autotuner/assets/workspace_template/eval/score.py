@@ -26,7 +26,7 @@ from pathlib import Path
 
 WS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(json.loads((WS / "charter.json").read_text(encoding="utf-8"))["skill_dir"]) / "scripts"))
-from common import label_matches, load_reference  # noqa: E402
+from common import json_label_equal, label_matches, load_reference  # noqa: E402
 
 
 def expected_keys(unit):
@@ -49,27 +49,72 @@ def _resolved_reference(entry):
         return False  # Exclusions must be explicit JSON true, not a truthy string or number.
     if "acceptable" in entry:
         # label_matches gives acceptable precedence over label when both are present.
-        return isinstance(entry["acceptable"], list) and bool(entry["acceptable"])
-    return "label" in entry
+        return (isinstance(entry["acceptable"], list) and bool(entry["acceptable"])
+                and all(json_label_equal(label, label) for label in entry["acceptable"]))
+    return "label" in entry and json_label_equal(entry["label"], entry["label"])
+
+
+def _parse_output(unit, output):
+    """Validate before flattening, so duplicate or malformed rows cannot win by overwrite.
+
+    Missing rows are handled by score() against the resolved reference. A partial,
+    otherwise well-formed output remains usable for reference disagreement merging.
+    """
+    if not isinstance(output, dict):
+        return {}, ["output must be an object"]
+    if not isinstance(output.get("items"), list):
+        return {}, ["items must be an array"]
+    expected = set(expected_keys(unit))
+    pred, seen, errors = {}, set(), []
+    for index, item in enumerate(output["items"]):
+        if not isinstance(item, dict):
+            errors.append(f"items[{index}] must be an object")
+            continue
+        if "key" not in item or not isinstance(item["key"], str):
+            errors.append(f"items[{index}].key must be a string")
+            continue
+        key = item["key"]
+        if key in seen:
+            errors.append(f"duplicate key {key!r}")
+        seen.add(key)
+        if key not in expected:
+            errors.append(f"unknown key {key!r}")
+        if "label" not in item:
+            errors.append(f"items[{index}].label is required")
+            continue
+        if not json_label_equal(item["label"], item["label"]):
+            errors.append(f"items[{index}].label must be a JSON value")
+            continue
+        pred[f"{unit['id']}|{key}"] = item["label"]
+    return pred, errors
 
 
 def flatten(unit, output):
-    if not isinstance(output, dict):
-        return {}
-    return {f"{unit['id']}|{it.get('key')}": it.get("label") for it in output.get("items", []) if isinstance(it, dict)}
+    # Reference generation must refuse invalid output rather than silently
+    # agreeing on whichever duplicate happened to appear last.
+    pred, errors = _parse_output(unit, output)
+    if errors:
+        raise ValueError(f"{unit['id']}: invalid output: " + "; ".join(errors))
+    return pred
 
 
 def score(units, outputs, split):
     ref = load_reference(WS, split)
     ref.pop("__unresolved__", None)
     items, gate = [], []
+    if not isinstance(outputs, dict):
+        gate.append("outputs must map unit ids to output objects")
+        outputs = {}
+    elif set(outputs) - {u["id"] for u in units}:
+        gate.append("outputs contain unknown unit ids")
+        outputs = {}
     for u in units:
         out = outputs.get(u["id"])
-        pred = flatten(u, out) if out is not None else {}
+        pred, errors = _parse_output(u, out)
+        if errors:
+            gate.extend(f"{u['id']}: {error}" for error in errors)
+            pred = {}  # An invalid unit must not receive partial or full success.
         keys = _item_keys(u)
-        extra = set(pred) - set(keys)
-        if out is not None and extra:
-            gate.append(f"{u['id']}: {len(extra)} unknown keys")
         for k in keys:
             entry = ref.get(k)
             if _resolved_reference(entry) and entry.get("exclude") is True:
@@ -83,6 +128,10 @@ def score(units, outputs, split):
                 continue
             ok = label_matches(p, entry) if k in pred else False
             tags = [] if ok else (["missing"] if k not in pred else ["wrong"])
+            if errors:
+                tags.append("invalid-output")
+            elif k not in pred:
+                gate.append(f"{u['id']}: missing output for {k}")
             if not ok:
                 tags.append(f"ref:{entry.get('label', 'acceptable-set')}")
             items.append({"id": k, "unit": u["id"], "score": 1.0 if ok else 0.0, "tags": tags,

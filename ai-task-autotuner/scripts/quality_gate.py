@@ -5,7 +5,7 @@ records input-data hashes, and writes WS/audit/quality_gate.json.
 
   python quality_gate.py WS                     # evaluate; exit 0 PASS, 2 REVIEW, 3 STOP, 5 INCOMPLETE
   python quality_gate.py WS --accept-review "user approved on <date>: <reason>"
-  python quality_gate.py WS --verify            # only re-check data hashes (exit 4 if changed)
+  python quality_gate.py WS --verify            # verify source scope, bytes and audit evidence (exit 4 if changed)
 
 checks.py must define `run_checks(ctx) -> list[dict]`; each finding is
   {"id", "severity": critical|high|medium|low|info, "title", "evidence", "affected",
@@ -31,19 +31,117 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import append_jsonl, hash_paths, now_iso, read_json, read_jsonl, sha256_file, sha256_text, write_json  # noqa: E402
+from common import append_jsonl, now_iso, read_json, read_jsonl, sha256_file, sha256_text, write_json  # noqa: E402
 
 SEVERITIES = ("critical", "high", "medium", "low", "info")
 STATUS_EXIT = {"PASS": 0, "REVIEW": 2, "STOP": 3, "INCOMPLETE": 5}
+AUDIT_EVIDENCE = ("audit/profile.md", "audit/data_audit.md", "audit/close_read.jsonl", "audit/checks.py")
+
+
+def _source_path(ws, value):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("data sources must be nonempty path strings")
+    path = Path(value)
+    try:
+        return (path if path.is_absolute() else Path(ws) / path).resolve()
+    except RuntimeError as e:
+        raise ValueError(f"cannot resolve source path: {value}") from e
+
+
+def _source_paths(ws, charter, role):
+    data = charter.get("data", {})
+    if not isinstance(data, dict) or not isinstance(data.get(role, []), list):
+        raise ValueError(f"charter.data.{role} must be a list of paths")
+    return [_source_path(ws, value) for value in data.get(role, [])]
+
+
+def _directory_snapshot(root):
+    """Include every file and empty directory, following links without cycles."""
+    files, directories = {}, []
+
+    def visit(path, prefix, ancestors):
+        canonical = path.resolve()
+        if canonical in ancestors:
+            raise ValueError("cyclic source directory symlink")
+        ancestors = ancestors | {canonical}
+        for child in sorted(path.iterdir(), key=lambda p: p.name):
+            relative = f"{prefix}/{child.name}" if prefix else child.name
+            if child.is_dir():
+                directories.append(relative)
+                visit(child, relative, ancestors)
+            elif child.is_file():
+                files[relative] = sha256_file(child)
+            else:
+                # Broken links, sockets and pipes cannot be silently absent
+                # from an audit of a declared directory.
+                raise ValueError(f"unsupported or missing source entry: {relative}")
+
+    visit(root, "", set())
+    return {"files": files, "directories": directories}
+
+
+def source_manifest(ws, charter=None):
+    """Ordered, role-aware source roots and their complete current contents.
+
+    Relative charter paths are relative to WS. Root aliases resolve to their
+    canonical path; order and duplicate declarations are retained. Relative
+    paths inside directory trees remain stable for verified relocation.
+    """
+    charter = read_json(Path(ws) / "charter.json", {}) if charter is None else charter
+    if not isinstance(charter, dict):
+        raise ValueError("charter must be an object")
+    manifest = {"version": 1}
+    for role in ("inputs", "aux"):
+        entries = []
+        for path in _source_paths(ws, charter, role):
+            entry = {"path": path.as_posix()}
+            try:
+                if path.is_file():
+                    entry.update(kind="file", sha256=sha256_file(path))
+                elif path.is_dir():
+                    entry.update(kind="directory", **_directory_snapshot(path))
+                else:
+                    entry["kind"] = "missing"
+            except (OSError, ValueError) as e:
+                entry.update(kind="unreadable", error=f"{type(e).__name__}: {e}")
+            entries.append(entry)
+        manifest[role] = entries
+    return manifest
+
+
+def _manifest_hashes(manifest):
+    hashes = {}
+    for role in ("inputs", "aux"):
+        for source in manifest.get(role, []):
+            if source.get("kind") == "file":
+                hashes[source["path"]] = source["sha256"]
+            elif source.get("kind") == "directory":
+                hashes.update({(Path(source["path"]) / name).as_posix(): sha
+                               for name, sha in source["files"].items()})
+    return hashes
+
+
+def _audit_evidence_hashes(ws):
+    return {relative: sha256_file(Path(ws) / relative) for relative in AUDIT_EVIDENCE
+            if (Path(ws) / relative).is_file()}
 
 
 class Ctx:
     def __init__(self, ws, charter):
         self.ws = Path(ws)
         self.charter = charter
-        self.inputs = [Path(p) for p in charter.get("data", {}).get("inputs", [])]
+        self.source_errors = []
+        try:
+            self.inputs = _source_paths(ws, charter, "inputs")
+        except ValueError as e:
+            self.inputs = []
+            self.source_errors.append(str(e))
         # auxiliary files the checks (or pipeline) read: provenance, side tables... hashed too
-        self.aux = [Path(p) for p in charter.get("data", {}).get("aux", [])]
+        try:
+            self.aux = _source_paths(ws, charter, "aux")
+        except ValueError as e:
+            self.aux = []
+            self.source_errors.append(str(e))
 
     def finding(self, id, severity, title, evidence="", affected=None, known=False, recommendation=""):
         assert severity in SEVERITIES + ("procedure",), severity
@@ -54,12 +152,15 @@ class Ctx:
 def load_module(path, name):
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    # A re-audit must run the exact source being hashed, even after a same-size
+    # edit within a filesystem timestamp tick (a stale .pyc is not evidence).
+    exec(compile(Path(path).read_bytes(), str(path), "exec"), mod.__dict__)
     return mod
 
 
 def builtin_checks(ctx):
     out = []
+    out.extend(ctx.finding("source-config-invalid", "critical", message) for message in ctx.source_errors)
     if not ctx.inputs:
         out.append(ctx.finding("inputs-missing", "critical", "charter.data.inputs is empty",
                                recommendation="list the data files the pipeline reads"))
@@ -132,11 +233,27 @@ def _same_review(old, gate):
     if old.get("review_scope") is not None:
         old_sha = _scope_sha(old["review_scope"])
         accepted_sha = (old.get("waiver") or {}).get("scope_sha256")
-        return (accepted_sha is None or accepted_sha == old_sha) and old_sha == _scope_sha(gate["review_scope"])
+        if accepted_sha is not None and accepted_sha != old_sha:
+            return False
+        old_scope, new_scope = old["review_scope"], gate["review_scope"]
+        if old_scope.get("source_manifest") is not None:
+            return old_sha == _scope_sha(new_scope)
+        # An old scope recorded roots but sorted away their order. A single
+        # root per role remains provable; multiple roots require one fresh
+        # acceptance instead of guessing the original ordering.
+        sources = old_scope.get("data_sources")
+        if (not isinstance(sources, dict) or any(len(sources.get(role, [])) > 1 for role in ("inputs", "aux"))
+                or sources != new_scope.get("data_sources")):
+            return False
+        comparable = dict(new_scope)
+        comparable.pop("source_manifest", None)
+        comparable["version"] = old_scope.get("version", 1)
+        return old_sha == _scope_sha(comparable)
     old_blocking = _blocking_findings(old)
     if any(f.get("id") == "close-read-defects" for f in old_blocking):
         return False
-    return (bool(old.get("data_hashes")) and bool(old.get("checks_sha"))
+    return (old.get("source_manifest") == gate.get("source_manifest")
+            and bool(old.get("data_hashes")) and bool(old.get("checks_sha"))
             and old_blocking == _blocking_findings(gate)
             and old["data_hashes"] == gate["data_hashes"]
             and old["checks_sha"] == gate["checks_sha"])
@@ -146,6 +263,10 @@ def evaluate(ws):
     ws = Path(ws)
     charter = read_json(ws / "charter.json", {})
     ctx = Ctx(ws, charter)
+    try:
+        before_sources = source_manifest(ws, charter)
+    except ValueError:
+        before_sources = None
     findings = builtin_checks(ctx) + close_read_findings(ctx)
     checks_path = ws / "audit" / "checks.py"
     if checks_path.exists():
@@ -155,6 +276,21 @@ def evaluate(ws):
             findings.append(ctx.finding("checks-crashed", "critical", f"checks.py raised {type(e).__name__}: {e}"))
     else:
         findings.append(ctx.finding("checks-missing", "high", "audit/checks.py missing"))
+    try:
+        sources = source_manifest(ws, charter)
+    except ValueError:
+        sources = None  # malformed source declarations already have critical findings
+    if sources is not None:
+        for role in ("inputs", "aux"):
+            for source in sources[role]:
+                if source["kind"] not in ("file", "directory"):
+                    findings.append(ctx.finding("source-unreadable", "critical",
+                                                f"cannot audit {role} source: {source['path']}",
+                                                evidence=source.get("error", source["kind"])))
+    if before_sources != sources:
+        findings.append(ctx.finding("sources-changed-during-audit", "critical",
+                                    "source scope or contents changed while audit checks were running",
+                                    recommendation="finish data changes and re-run the audit"))
     blocking = [f for f in findings if not f.get("known")]
     if any(f["severity"] == "procedure" for f in findings):
         status = "INCOMPLETE"
@@ -165,19 +301,21 @@ def evaluate(ws):
     else:
         status = "PASS"
     counts = {s: sum(1 for f in findings if f["severity"] == s) for s in SEVERITIES + ("procedure",)}
-    existing = [p for p in ctx.inputs + ctx.aux if p.exists()]
     gate = {"status": status, "created": now_iso(), "counts": counts, "findings": findings,
-            "data_hashes": hash_paths(existing), "checks_sha": sha256_file(checks_path) if checks_path.exists() else None,
+            "data_hashes": _manifest_hashes(sources or {}), "source_manifest": sources,
+            "audit_evidence_hashes": _audit_evidence_hashes(ws),
+            "checks_sha": sha256_file(checks_path) if checks_path.exists() else None,
             "waiver": None}
     # The displayed close-read finding abbreviates evidence to five records and
     # 80 characters each. Approval must cover the complete underlying defects.
     defects = [r for r in read_jsonl(ws / "audit" / "close_read.jsonl") if r.get("verdict") == "defect"]
     gate["review_scope"] = {
-        "version": 1,
+        "version": 2,
         "findings": _blocking_findings(gate),
         "data_hashes": gate["data_hashes"],
-        "data_sources": {"inputs": sorted(str(p) for p in ctx.inputs),
-                         "aux": sorted(str(p) for p in ctx.aux)},
+        "source_manifest": sources,
+        "data_sources": {"inputs": sorted(p.as_posix() for p in ctx.inputs),
+                         "aux": sorted(p.as_posix() for p in ctx.aux)},
         "checks_sha": gate["checks_sha"],
         "close_read_defects": sorted(defects, key=lambda r: json.dumps(r, sort_keys=True, ensure_ascii=False))
         if any(f.get("id") == "close-read-defects" for f in _blocking_findings(gate)) else [],
@@ -186,30 +324,58 @@ def evaluate(ws):
 
 
 def verify_hashes(ws):
-    """Return list of changed/missing data files versus the recorded gate."""
-    gate = read_json(Path(ws) / "audit" / "quality_gate.json")
-    if not gate:
-        return ["quality_gate.json missing"]
-    changed = []
-    for path, h in gate.get("data_hashes", {}).items():
-        if not os.path.exists(path):
-            changed.append(f"missing: {path}")
-        elif sha256_file(path) != h:
-            changed.append(f"changed: {path}")
-    return changed
+    """Verify current source declarations, expanded bytes and audit evidence."""
+    ws = Path(ws)
+    try:
+        gate = read_json(ws / "audit" / "quality_gate.json")
+        if not isinstance(gate, dict) or not gate:
+            return ["quality_gate.json missing or invalid"]
+        recorded = gate.get("source_manifest")
+        if not isinstance(recorded, dict) or recorded.get("version") != 1:
+            return ["source manifest missing; re-run quality_gate.py to audit the current source scope"]
+        current = source_manifest(ws)
+        changed = []
+        if recorded != current:
+            changed.append("source scope or contents changed; re-run quality_gate.py")
+        if any(source.get("kind") not in ("file", "directory")
+               for role in ("inputs", "aux") for source in current[role]):
+            changed.append("one or more source roots are missing or unreadable")
+        if gate.get("data_hashes") != _manifest_hashes(current):
+            changed.append("expanded audited file set or hashes changed")
+        scope = gate.get("review_scope")
+        if isinstance(scope, dict) and scope.get("source_manifest") not in (None, recorded):
+            changed.append("recorded REVIEW source scope disagrees with the audit manifest")
+        evidence = _audit_evidence_hashes(ws)
+        if set(evidence) != set(AUDIT_EVIDENCE) or gate.get("audit_evidence_hashes") != evidence:
+            changed.append("audit evidence or check code changed; re-run quality_gate.py")
+        if gate.get("checks_sha") != evidence.get("audit/checks.py"):
+            changed.append("audit/checks.py differs from the audited version")
+        return changed
+    except (OSError, ValueError, TypeError, KeyError) as e:
+        return [f"cannot verify audit sources: {e}; re-run quality_gate.py"]
 
 
 def gate_allows_runs(ws):
     """(allowed, reason) - used by run_experiment.py."""
-    gate = read_json(Path(ws) / "audit" / "quality_gate.json")
-    if not gate:
+    try:
+        gate = read_json(Path(ws) / "audit" / "quality_gate.json")
+    except (OSError, ValueError) as e:
+        return False, f"invalid quality gate: {e}; re-run quality_gate.py"
+    if not isinstance(gate, dict) or not gate:
         return False, "no audit/quality_gate.json - run the data audit and quality_gate.py first"
+    if gate.get("status") not in STATUS_EXIT:
+        return False, "invalid quality gate status; re-run quality_gate.py"
     if gate["status"] == "INCOMPLETE":
         return False, "audit incomplete - finish the missing audit steps and re-run quality_gate.py"
     if gate["status"] == "STOP":
         return False, "quality gate is STOP - report the findings to the user; do not run experiments"
     if gate["status"] == "REVIEW" and not gate.get("waiver"):
         return False, "quality gate is REVIEW - report to the user; only they can accept it (--accept-review)"
+    if gate["status"] == "REVIEW":
+        waiver, scope = gate.get("waiver"), gate.get("review_scope")
+        if (not isinstance(waiver, dict) or not isinstance(scope, dict)
+                or waiver.get("scope_sha256") != _scope_sha(scope)):
+            return False, "REVIEW acceptance does not match its scope; re-run quality_gate.py"
     changed = verify_hashes(ws)
     if changed:
         return False, "input data changed since the gate: " + "; ".join(changed[:5])

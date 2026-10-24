@@ -258,11 +258,13 @@ class DiversifyTest(unittest.TestCase):
                 rows.append({"event": "decide", "exp": f"E{i:03d}", "decision": "discard", "phase": "quality", "at": str(i)})
             for r in rows:
                 common.append_jsonl(ws / "ledger.jsonl", r)
-            with mock.patch.object(ledger, "task_review_allows_runs", return_value=(True, "fixture")):
+            with mock.patch.object(ledger, "task_review_allows_runs", return_value=(True, "fixture")), \
+                    mock.patch.object(ledger, "gate_allows_runs", return_value=(True, "fixture")):
                 rec = ledger.recommend(ws)
             self.assertEqual(rec["rec"][0], "FRESH_EYES")
             common.append_jsonl(ws / "ledger.jsonl", {"event": "mark", "kind": "fresh-eyes", "text": "x", "at": "9"})
-            with mock.patch.object(ledger, "task_review_allows_runs", return_value=(True, "fixture")):
+            with mock.patch.object(ledger, "task_review_allows_runs", return_value=(True, "fixture")), \
+                    mock.patch.object(ledger, "gate_allows_runs", return_value=(True, "fixture")):
                 rec = ledger.recommend(ws)
             self.assertEqual(rec["rec"][0], "DIVERSIFY")
         finally:

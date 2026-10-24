@@ -34,6 +34,7 @@ unattended for a long time, so state lives on disk and the conversation stays sm
   STOP/REVIEW gate means report to the user and wait. Tuning on broken data "improves" an artifact.
 - **The measurement is frozen.** Never edit the scorer, references or splits to make a
   candidate win. A genuine scorer/reference fix is a new eval version: rescore and re-validate.
+  Primary direction, validation thresholds and guards are part of that eval version too.
   Changed input bytes, source roles/order/scope, loader or splits require newly generated
   outputs; rescoring cannot certify outputs made from different data.
 - **Review the task before measuring it.** A fresh reviewer checks the draft design and
@@ -43,6 +44,10 @@ unattended for a long time, so state lives on disk and the conversation stays sm
   (phase switch, final), counting candidate identity, bytes and effective settings. Protection follows the
   actual loaded unit ids, including full runs and custom split aliases, even for code-only
   candidates. Its item details are never read.
+- **Metric directions are explicit.** Use `primary.direction: min` for error/loss and `max`
+  for reward. Targets and the quality bound follow that direction. Item scores have their
+  own `primary.item_direction` (default `max` for correctness); do not reverse them merely
+  because the headline is an error rate. See evaluation.md for null/oracle/optimum settings.
 - **Name numbers honestly.** Agreement with a model-made reference is not accuracy; the
   auto-decided rate, self-consistency and schema validity are not accuracy either. Report
   exclusions and failures against the original totals; never drop hard cases to raise a score.
@@ -105,7 +110,9 @@ detection stops with `--backend` guidance. Legacy `cli` means Claude, preserving
 | 6 Finalize | holdout, repeats (pass^k), full-scope run, deliverables, report | `deliverables/`, `report.md` | [report.md](references/report.md) |
 
 Gates are enforced by scripts, not by memory: `run_experiment.py` refuses to run without a
-non-blocking quality gate and unchanged input hashes, refuses experiment/holdout runs without
+non-blocking quality gate, a current source manifest and unchanged audit evidence. Source
+roots, roles, order, additions/removals and directory contents are checked; a legacy gate
+without sufficient evidence needs re-audit. The runner refuses experiment/holdout runs without
 a passing eval validation for the current eval hash, and freezes candidate bytes plus merged
 backend/model/effort and runtime settings at its first non-smoke measurement. A setting change,
 including actual concurrency, needs a new candidate. `--exp` must name the proposal for that
@@ -146,6 +153,10 @@ automatically escalate to another model. Same-model reference agreement does not
 independent correctness. Price supported backends first; leave unreported cost unknown.
 If validation shows the noise floor is
 not below the headroom, the loop cannot show real wins: enlarge dev or change the metric first.
+Both validation/noise runs must cover the complete dev set with unique metadata and output ids,
+and must be distinct runs. A partial baseline or the same run supplied twice is rejected.
+Malformed or duplicate item predictions fail the output gate; strict reference merging refuses
+them before replacing existing labels.
 
 ## The loop (one screen)
 
@@ -165,7 +176,8 @@ not below the headroom, the loop cannot show real wins: enlarge dev or change th
 
 Decision rules, phases, repeats and stop rules are in loop.md; the ledger applies them.
 Accuracy first; at the quality target or plateau switch to the efficiency phase, where the
-quality floor is held and cost per unit, latency or structure improve. With no user limits,
+quality bound is held (a lower floor for max, an upper ceiling for min) and cost per unit,
+latency or structure improve. With no user limits,
 stop when the efficiency phase plateaus too, then finalize.
 
 ## Avoiding dead ends

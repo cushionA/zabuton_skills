@@ -1,6 +1,6 @@
 # Astra 引き継ぎ: ai-task-autotuner のレビューと修正
 
-更新日: 2026-10-20 JST。従来の `ai-task-autotuner/HANDOFF.md` は初期開発と実データ試験の記録として保存し、本書を今回の修正についての補足とする。旧 HANDOFF の既定バックエンド・テスト件数・既知問題の記述は本書と現コードで読み替える。
+初回更新日: 2026-10-20 JST。従来の `ai-task-autotuner/HANDOFF.md` は初期開発と実データ試験の記録として保存し、本書を今回の修正についての補足とする。旧 HANDOFF の既定バックエンド・テスト件数・既知問題の記述は本書と現コードで読み替える。後続の修正は末尾の追記に記録する。
 
 ## 作業対象と依頼
 
@@ -10,7 +10,7 @@
 - push前に取り込み済みのリモート側の追加修正: `f9a0c2ff2d1a33542a84b2e0e1999e10c1f5df00`（空の参照ディレクトリを初期化時に作る修正）。
 - 主対象は **`ai-task-autotuner` スキル本体と実験ハーネス**。SKU 突合パイプラインの個別改善だけを依頼されているわけではない。
 - ユーザーはレビュー後に、独立したタスクレビュー段階の追加、優先不備3件、実行元に応じたCLI切り替え、残件6件の修正を指示した。
-- 最新の依頼は「アストラに引き継ぐのでデータとハンズオフ push」。引き継ぎ先では現コードを独立に確認し、既存テストが見落とす経路を優先する。
+- 引き継ぎpush後、ユーザーから「なおしまくろう！」と残件の修正依頼があった。下記の旧残件3群と、検証・起動設定の関連経路を修正した。引き継ぎ先では現コードを独立に確認し、既存テストが見落とす経路を優先する。
 
 ## 今回の反映内容
 
@@ -58,11 +58,11 @@
 python -B -m unittest discover -s ai-task-autotuner/tests
 ```
 
-最新の修正完了時は **140件成功**。通常はPython標準ライブラリと偽CLI/偽モデルで動き、有料モデル呼び出しを必要としない。`git diff --check` も確認する。
+今回の最終確認は **216件成功**、`git diff --check` も成功。前回の引き継ぎpush時は140件だった。通常はPython標準ライブラリと偽CLI/偽モデルで動き、有料モデル呼び出しを必要としない。Codex起動互換性は実CLIとローカル偽APIも使って確認した。元ZIPと証拠ファイルのSHA-256も変更がないことを確認済み。
 
-- Luna の小さな実機リクエストは試したが、認証refreshのHTTP 401で成功応答に至っていない。管理環境ではCode Mode host-disabledの起動診断も出た。認証が直った後の正常応答、usageイベント、CLI互換性は未確認。
+- 起動修正後のLuna実機リクエストは1回で認証refreshのHTTP 401を返し、`auth_required: true`。Code Modeの起動エラーは出なくなった。実CLI→ローカル偽Responsesサーバーでは正常なSSE応答、`tools: []`、usageを確認したが、認証を伴うLuna本体の正常応答は未確認。認証情報は変更していない。
 - Claudeの実機呼び出しやAnthropic API実通信、今回の修正版でのSKU全体ベンチマークは再実施していない。
-- 上記140件成功は、元のSKU成果を改善した証拠でも、全不備がなくなった証明でもない。
+- テスト成功は、元のSKU成果を改善した証拠でも、全不備がなくなった証明でもない。
 - 有料ベンチマーク、モデルの格上げ、ホスト側の認証・設定変更は今回の引き継ぎpushには含まれない。追加実施はユーザーの指示・既存の予算範囲を確認してから行う。
 
 ## データと過去レビューの読み方
@@ -78,12 +78,16 @@ python -B -m unittest discover -s ai-task-autotuner/tests
 
 SKU試験は楽天→au PAYマーケット152商品ペアに基づく。報告数値は**参照データとの一致率**で、正解率ではない。SKU参照はOpusの独立2回実行から作成し、人の確認はしていない。商品特定の参照は付属ペア表で、noneは人工生成。過去の開発に使ったデータなので独立評価ではない。手作業の確認前に「モデル能力が原因でない」などの旧報告の因果結論を確定事項として扱わない。
 
-## 次に確認すべき、まだ残る具体的な経路
+## 追記: 旧残件3群と起動設定の修正
 
-2026-10-20の引き継ぎ時点の現コードを読み、次は残っていると確認した。今回修正した6群の完了と「既報の全不備を修正済み」は区別する。
+1. **最小化指標:** `primary.direction=min` の品質目標は `<=`、自動品質境界は現値＋`min_delta`。表示、DRIFT、コードのみの候補選択も方向に従う。`primary.item_direction` は項目スコアの方向で、正答スコアなら既定の`max`、項目損失なら`min`を指定する。primaryの誤り率と混同しない。
+2. **評価検証の方向と来歴:** minでは`null_min`／`oracle_max`／`optimum`に従い、null・oracle・corrupt・headroomを検証する。primary契約とguardsも評価ハッシュに含める。dev全件の一意なmetadata/output IDを持つ別々の実行が必要で、部分baseline、重複行、同じrunの二重指定は拒否する。保存した項目スコアも再計算結果と照合し、反復間のitem集合・unit所属の変化を拒否する。メトリックだけの変更は再採点・再検証、元データや入力定義の変更は再生成する。
+3. **不正・重複出力:** テンプレートは重複key、未知ID、不正なitems・型・label欠落をgate failureとして扱い、期待項目を分母に残す。`items: null`でもクラッシュしない。正当なnull／false／0等のJSONラベルは維持し、boolを数値と同一視しない。参照用`flatten`も不正出力を拒否し、既存参照を上書きしない。初回baselineにもhard gate・guard・実行基盤の検査を適用し、`--override keep`で制約を迂回させない。
+4. **監査source集合:** `source_manifest`で役割・順序・根・全ファイル・空ディレクトリ・入れ子リンクを固定し、追加・差し替え・削除を直接`--verify`で検出する。監査証拠・チェックコードも固定し、変更後はローカルで再監査する。旧形式で証拠が不足する場合も再監査が必要で、移設は同一内容を確認してmanifestのパスだけを更新する。
+5. **Codex起動互換性:** `features.code_mode_host`を起動基盤として有効にし、`code_mode`とモデル向けツールは無効のままにした。実CLIとローカル偽APIでツール0件、正常応答、usageを確認。401・token refresh・sign-inエラーは接続失敗文が混ざっても再試行しない。
 
-1. **primary.direction=min のtargetと自動floor:** `ledger.py` のrecommendは品質目標に `primary >= target` を使い、phase変更時の自動floorは `current - min_delta` のまま。min方向の目標到達判定と効率フェーズの許容上限は独立に確認・修正が必要。
-2. **テンプレートの不正・重複items:** `assets/workspace_template/eval/score.py::flatten` は辞書化で同じkeyの重複を上書きする。`items: null` は反復不能となる。入力契約違反をgate failureとして扱うべき経路が未整備。参照網羅性の修正とは別問題。
-3. **監査のsource一覧差し替え検出:** `quality_gate.py::verify_hashes` 単体は保存済みパスだけを照合し、現charterのsource追加・差し替えを比較しない。新しいデータfingerprintやtask-reviewは測定側の一部経路を止めるが、`quality_gate --verify` の「data unchanged」がsource集合の監査保証になるわけではない。
+この追記に対応するテストは `test_primary_direction.py`、`test_eval_direction.py`、
+`test_output_contract.py`、`test_reference_contract.py`、`test_audit_sources.py`、
+`test_codex_startup.py` にある。元ZIPと`review-data/evidence/`は過去の証拠として変更していない。
 
-このほかも、現在の修正が入力契約・評価の独立性・全CLI入口で一貫するかを確認する。特に直接Python API、移設、legacy run、途中失敗、同時実行、設定overrideの境界を重視する。実際の最小再現を添えて判断し、古い証拠だけで未修正と断定しない。
+残る実機確認は、認証が復旧した環境でのLunaの正常応答と実データベンチマーク。人が未確認の参照というデータの限界も残る。入力契約・評価の独立性・全CLI入口の境界は、直接Python API、移設、legacy run、途中失敗、同時実行、設定overrideを含め、実際の最小再現を添えて引き続き確認する。

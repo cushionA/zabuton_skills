@@ -26,19 +26,35 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import append_jsonl, load_reference, read_json, read_jsonl  # noqa: E402
+from common import append_jsonl, json_label_equal, load_reference, read_json, read_jsonl  # noqa: E402
 from workspace import load_eval  # noqa: E402
 
 
 def _flatten_run(ws, run_dir, units_by_id, score_mod):
     rows = read_jsonl(Path(run_dir) / "outputs.jsonl")
-    flat = {}
+    flat, seen_units = {}, set()
     for r in rows:
-        if r.get("status") != "ok" or r["id"] not in units_by_id:
+        if not isinstance(r, dict):
+            sys.exit(f"REFUSED: invalid output record in {Path(run_dir).name}")
+        if r.get("status") != "ok":
             continue
-        for k, v in (score_mod.flatten(units_by_id[r["id"]], r["output"]) or {}).items():
+        unit_id = r.get("id")
+        if not isinstance(unit_id, str) or unit_id not in units_by_id:
+            sys.exit(f"REFUSED: unknown reference unit {unit_id!r} in {Path(run_dir).name}")
+        if unit_id in seen_units:
+            sys.exit(f"REFUSED: duplicate reference unit {unit_id!r} in {Path(run_dir).name}")
+        seen_units.add(unit_id)
+        try:
+            values = score_mod.flatten(units_by_id[unit_id], r.get("output"))
+        except (ValueError, TypeError) as e:
+            sys.exit(f"REFUSED: invalid reference output in {Path(run_dir).name}, unit {unit_id}: {e}")
+        if not isinstance(values, dict):
+            sys.exit(f"REFUSED: flatten() must return a mapping in {Path(run_dir).name}, unit {unit_id}")
+        for k, v in values.items():
             if not isinstance(k, str):
-                sys.exit("flatten() keys must be strings, e.g. f\"{unit_id}|{item_key}\"")
+                sys.exit("REFUSED: flatten() keys must be strings, e.g. f\"{unit_id}|{item_key}\"")
+            if k in flat:
+                sys.exit(f"REFUSED: duplicate flattened reference key {k!r} in {Path(run_dir).name}")
             flat[k] = v
     meta = read_json(Path(run_dir) / "meta.json", {})
     return flat, meta.get("config", {}).get("model", "?")
@@ -60,7 +76,7 @@ def merge(ws, run_a, run_b, split):
     n_agree = n_dis = 0
     for k in sorted(set(fa) | set(fb), key=str):
         a, b = fa.get(k), fb.get(k)
-        if k in fa and k in fb and a == b:
+        if k in fa and k in fb and json_label_equal(a, b):
             append_jsonl(agree_p, {"key": k, "label": a, "source": f"agree:{ma}|{mb}"})
             n_agree += 1
         else:

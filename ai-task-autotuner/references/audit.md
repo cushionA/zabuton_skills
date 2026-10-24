@@ -64,6 +64,24 @@ inconvenient units, or mark an issue `known` just to pass. Only the user can acc
 acceptance resumes it. If the data changes, re-run the audit; runs refuse to start when input
 hashes differ from the gate.
 
+The gate records `source_manifest`: ordered input and auxiliary roots, their roles, and each
+root's current contents. Relative source paths are relative to WS. Verification detects
+added, removed or replaced roots, role/order changes, directory file changes and empty
+directories. Nested directory links are followed; unreadable entries, broken links and cycles
+cannot be silently omitted. `quality_gate.py WS --verify` checks the current manifest against
+the recorded one, not just the files that existed at the previous audit.
+
+`audit_evidence_hashes` also pins `profile.md`, `data_audit.md`, `close_read.jsonl` and
+`checks.py`. Changing evidence or check code requires a local re-audit before another run.
+Adding harmless notes or successful close reads does not itself withdraw a data-issue
+acceptance: after re-audit, unchanged substantive blocking findings can retain it. A new
+defect still needs the existing REVIEW process. Legacy gates without enough source-manifest
+evidence require re-audit; `--migrate` cannot invent that evidence or an acceptance.
+
+Verified relocation remaps manifest paths only after checking the same source bytes and
+reviewed evidence. The generation fingerprint uses the same complete source scanner while
+excluding root locations, so moving identical inputs does not manufacture a new dataset.
+
 A recorded REVIEW acceptance carries forward only when the substantive blocking findings,
 audited data and check code are identical. A finding id is not the accepted scope: new affected
 records, evidence or severity under the same id invalidate the old acceptance. Older close-read

@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import append_jsonl, digest, now_iso, read_json, read_jsonl, sha256_file, write_json  # noqa: E402
-from quality_gate import Ctx, _scope_sha, close_read_findings  # noqa: E402
+from quality_gate import Ctx, _scope_sha, close_read_findings, source_manifest  # noqa: E402
 from task_review import _snapshot  # noqa: E402
 
 
@@ -50,6 +50,14 @@ def _mapped_charter(ch, pairs):
     if ch.get("brief"):
         ch["brief"] = remap(ch["brief"], pairs)
     return ch
+
+
+def _mapped_source_manifest(manifest, pairs):
+    mapped = copy.deepcopy(manifest)
+    for role in ("inputs", "aux"):
+        for entry in mapped.get(role, []):
+            entry["path"] = str(remap(entry["path"], pairs))
+    return mapped
 
 
 def _mapped_snapshot(snapshot, ws, original_ws, pairs):
@@ -113,6 +121,12 @@ def relocate(ws, pairs=(), dry_run=False):
     new_gate = copy.deepcopy(gate)
     if gate:
         _verify_audit_evidence(ws, gate, new_ch)
+        if not gate.get("source_manifest"):
+            raise ValueError("recorded audit has no source manifest; re-run quality_gate.py before relocation")
+        manifest = _mapped_source_manifest(gate["source_manifest"], pairs)
+        if manifest != source_manifest(ws, new_ch):
+            raise ValueError("audited source roots, roles or bytes changed beyond relocation; re-audit required")
+        new_gate["source_manifest"] = manifest
         new_gate["data_hashes"] = _mapped_hashes(gate.get("data_hashes", {}), pairs)
         scope = new_gate.get("review_scope")
         if scope:
@@ -120,6 +134,13 @@ def relocate(ws, pairs=(), dry_run=False):
             if waiver and waiver.get("scope_sha256") not in (None, _scope_sha(gate["review_scope"])):
                 raise ValueError("recorded REVIEW acceptance does not match its scope")
             scope["data_hashes"] = _mapped_hashes(scope.get("data_hashes", {}), pairs)
+            if scope.get("source_manifest"):
+                mapped_scope_manifest = _mapped_source_manifest(scope["source_manifest"], pairs)
+                if mapped_scope_manifest != manifest:
+                    raise ValueError("REVIEW source manifest differs from the audited sources")
+                scope["source_manifest"] = mapped_scope_manifest
+            elif waiver:
+                raise ValueError("legacy REVIEW acceptance has no source manifest; re-run quality_gate.py")
             if "data_sources" in scope:
                 scope["data_sources"] = {kind: sorted(str(remap(p, pairs)) for p in paths)
                                          for kind, paths in scope["data_sources"].items()}

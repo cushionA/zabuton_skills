@@ -34,6 +34,7 @@ from workspace import (candidate_hash, charter as load_charter, data_fingerprint
                        eval_hash, ledger_rows, list_runs)  # noqa: E402
 from task_review import task_review_allows_runs  # noqa: E402
 from run_policy import active_hours as policy_active_hours, limit_state  # noqa: E402
+from quality_gate import gate_allows_runs  # noqa: E402
 
 LEVER_GROUPS = ["prompt", "input", "output", "decomposition", "deterministic", "model", "ensemble",
                 "context", "simplify", "harness"]
@@ -55,6 +56,25 @@ def _get(d, dotted):
 
 def _finite(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _direction(ch, field="direction"):
+    """Primary and item-score directions are separate contracts."""
+    value = ch.get("primary", {}).get(field, "max")
+    if value not in ("max", "min"):
+        sys.exit(f"primary.{field} must be max or min, got {value!r}")
+    return 1 if value == "max" else -1
+
+
+def _paired_quality(ch, before, after):
+    # Existing scorers return correctness scores (higher is better), even when
+    # their headline metric is error rate. Only explicit item_direction=min
+    # changes how item contributions are compared; stored scores stay intact.
+    direction = _direction(ch, "item_direction")
+    if direction < 0:
+        before = [dict(item, score=-item.get("score", 0.0)) for item in before]
+        after = [dict(item, score=-item.get("score", 0.0)) for item in after]
+    return paired_items(before, after)
 
 
 def _complete_mean(values, *, nonnegative=False):
@@ -212,6 +232,8 @@ def cmd_propose(a):
     ws = Path(a.ws)
     st = _state(ws)
     ch = load_charter(ws)
+    _direction(ch)
+    _direction(ch, "item_direction")
     limits = _limits(ws, ch)
     cap = limits["limits"].get("max_experiments")
     if cap is not None and limits["n_exp"] >= cap:
@@ -248,12 +270,15 @@ def decide(ws, exp, split="dev", override=None, reason=None):
     ws = Path(ws)
     st = _state(ws)
     ch = load_charter(ws)
+    if override not in (None, "keep", "discard"):
+        sys.exit("override must be keep or discard")
     prop = st["props"].get(exp)
     if not prop:
         sys.exit(f"unknown experiment {exp}")
     loop = ch.get("loop", {})
     eff_metric = ch.get("efficiency_metric", "cost_usd_per_unit")
-    direction = 1 if ch.get("primary", {}).get("direction", "max") == "max" else -1
+    direction = _direction(ch)
+    _direction(ch, "item_direction")
     runs = _exp_runs(ws, exp, split)
     if not runs:
         sys.exit(f"no complete runs for {exp} on {split}")
@@ -262,6 +287,13 @@ def decide(ws, exp, split="dev", override=None, reason=None):
         sys.exit("run attribution invalid - restore the measured candidate or void and rerun: " + " | ".join(invalid))
     if any(r["stale"] for r in runs):
         sys.exit("some runs were scored with an older eval - rescore them (run_experiment.py --rescore)")
+    for run in runs:
+        summary = run["summary"]
+        harness = summary.get("harness_error_rate")
+        failures = summary.get("gate_failures")
+        if (not _finite(harness) or not 0 <= harness <= 1
+                or not isinstance(failures, int) or isinstance(failures, bool) or failures < 0):
+            sys.exit(f"run {run['run_id']} has missing or invalid measurement safety counts; repair the measurements first")
     cand = _pool(runs, eff_metric)
     if cand["primary"] is None:
         sys.exit("primary is missing or nonfinite in one or more runs; repair the measurements first")
@@ -284,37 +316,39 @@ def decide(ws, exp, split="dev", override=None, reason=None):
     noise = ch.get("noise") or {}
     min_delta = loop.get("min_delta") or noise.get("min_delta") or 1.0 / n_items
     min_eff = loop.get("min_efficiency_gain", 0.10)
-    if prop.get("lever") == "baseline" and best is None:
-        decision, why = "baseline", "first measured point"
-    elif best_pool is None:
-        sys.exit("no baseline yet - propose and decide a baseline (lever=baseline) first")
-    else:
-        pi = paired_items(best_pool["items"], cand["items"])
+    if best_pool is not None:
+        pi = _paired_quality(ch, best_pool["items"], cand["items"])
         delta = direction * (cand["primary"] - best_pool["primary"])
         eff_ratio = _efficiency_ratio(cand["eff"], best_pool["eff"])
         out.update(delta=delta, min_delta=min_delta,
                    paired={k: pi[k] for k in ("n", "units", "improved", "regressed", "units_improved",
                                               "units_regressed", "band", "ci", "p")},
                    eff_ratio=eff_ratio, best_exp=best["exp"])
-        guards = _guard_violations(ch.get("guards"), cand, best_pool)
-        harness_cap = max(0.05, 2 * best_pool["harness"])
         marginal = (delta < 2 * min_delta) and cand["n_runs"] < 2
-        if cand["harness"] > harness_cap:
-            decision, why = "void", f"harness error rate {cand['harness']:.2%} > {harness_cap:.2%}: fix infra and rerun"
-        elif cand["gate_failures"]:
-            decision, why = "invalid", f"{cand['gate_failures']} hard-gate failures (schema/coverage)"
-        elif guards:
-            decision, why = "discard", "guard violated: " + "; ".join(guards)
-        elif out["phase"] == "efficiency":
+    guards = _guard_violations(ch.get("guards"), cand, best_pool)
+    harness_cap = max(0.05, 2 * best_pool["harness"]) if best_pool is not None else 0.05
+    if cand["harness"] > harness_cap:
+        decision, why = "void", f"harness error rate {cand['harness']:.2%} > {harness_cap:.2%}: fix infra and rerun"
+    elif cand["gate_failures"]:
+        decision, why = "invalid", f"{cand['gate_failures']} hard-gate failures (schema/coverage)"
+    elif guards:
+        decision, why = "discard", "guard violated: " + "; ".join(guards)
+    elif prop.get("lever") == "baseline" and best is None:
+        decision, why = "baseline", "first measured point"
+    elif best_pool is None:
+        sys.exit("no baseline yet - propose and decide a baseline (lever=baseline) first")
+    else:
+        if out["phase"] == "efficiency":
             floor = ch.get("quality_floor")
             q_ok = floor is None or direction * (cand["primary"] - floor) >= 0
             gain = (1 - eff_ratio) if eff_ratio is not None else None
             if not q_ok:
-                decision, why = "discard", f"primary {cand['primary']:.4f} below floor {floor}"
+                bound = "below floor" if direction > 0 else "above ceiling"
+                decision, why = "discard", f"primary {cand['primary']:.4f} {bound} {floor}"
             elif gain is not None and gain >= min_eff:
                 near_floor = floor is not None and direction * (cand["primary"] - floor) < min_delta / 2
                 decision = "rerun" if (near_floor and cand["n_runs"] < 2) else "keep"
-                why = f"{eff_metric} -{gain:.0%} with primary held" + (" (near floor: confirm with a repeat)" if decision == "rerun" else "")
+                why = f"{eff_metric} -{gain:.0%} with primary held" + (" (near quality bound: confirm with a repeat)" if decision == "rerun" else "")
             elif delta >= min_delta and gain is not None and gain > -0.05 and pi["improved"] > pi["regressed"]:
                 decision = "rerun" if marginal else "keep"
                 why = f"primary +{delta:.4f} at equal cost"
@@ -333,8 +367,10 @@ def decide(ws, exp, split="dev", override=None, reason=None):
                 decision, why = "discard", f"primary {delta:+.4f} vs min_delta {min_delta:.4f}; items +{pi['improved']}/-{pi['regressed']}"
     if out.get("paired") and out["paired"].get("ci") and out["paired"]["ci"][0] is not None:
         lo, hi = out["paired"]["ci"]
-        why += f"; unit-bootstrap 95% CI [{direction * lo:+.4f}, {direction * hi:+.4f}]"
+        why += f"; unit-bootstrap 95% item-score improvement CI [{lo:+.4f}, {hi:+.4f}]"
     if override:
+        if override == "keep" and (decision in ("invalid", "void") or guards):
+            sys.exit("cannot override hard measurement constraints or configured guards with keep")
         why = f"OVERRIDE {decision}->{override}: {reason or 'no reason given'} | {why}"
         decision = override
     out.update(decision=decision, reason=why)
@@ -374,6 +410,9 @@ def _gate(ws):
         return "AUDIT", "audit incomplete: " + "; ".join(f["title"] for f in gate["findings"] if f["severity"] == "procedure")
     if gate["status"] == "STOP" or (gate["status"] == "REVIEW" and not gate.get("waiver")):
         return "WAIT_USER", f"quality gate {gate['status']}: report findings to the user and wait (clock paused)"
+    allowed, reason = gate_allows_runs(ws)
+    if not allowed:
+        return "AUDIT", reason
     allowed, reason = task_review_allows_runs(ws)
     if not allowed:
         return "TASK_REVIEW", reason
@@ -384,6 +423,8 @@ def recommend(ws):
     ws = Path(ws)
     st = _state(ws)
     ch = load_charter(ws)
+    direction = _direction(ch)
+    _direction(ch, "item_direction")
     loop = ch.get("loop", {})
     patience = loop.get("patience", 5)
     phase = ch.get("phase", "quality")
@@ -438,9 +479,10 @@ def recommend(ws):
         rec = ("BASELINE", "propose lever=baseline, run it twice (--tag r2), validate_eval.py, decide")
     else:
         q_target = targets.get("quality")
-        reached = q_target is not None and best.get("primary") is not None and best["primary"] >= q_target
+        primary, efficiency, stale = current_value(ws, best, eff_metric=ch.get("efficiency_metric"))
+        reached = not stale and _finite(q_target) and _finite(primary) and direction * (primary - q_target) >= 0
         e_target = targets.get("efficiency")
-        e_reached = e_target is not None and best.get("eff") is not None and best["eff"] <= e_target
+        e_reached = not stale and _finite(e_target) and _finite(efficiency) and efficiency <= e_target
         plateau = stall >= patience and len(set(groups_since)) >= 3 and fresh
         if phase == "quality" and (reached or plateau):
             rec = ("SWITCH_PHASE", ("quality target reached" if reached else f"quality plateau ({stall} non-keeps, "
@@ -464,6 +506,7 @@ def recommend(ws):
 def print_status(ws, compact=False, write=False):
     ws = Path(ws)
     ch = load_charter(ws)
+    direction = _direction(ch)
     r = recommend(ws)
     st, best, lim = r["st"], r["best"], r["limits"]
     lines = []
@@ -481,27 +524,36 @@ def print_status(ws, compact=False, write=False):
         lines.append(f"NOISE min_delta={noise.get('min_delta'):.4f} band={noise.get('band')} n_items={noise.get('n_items')} "
                      f"headroom={noise.get('headroom')}")
     if ch.get("quality_floor") is not None:
-        lines.append(f"FLOOR primary >= {ch['quality_floor']}")
+        lines.append(f"{'FLOOR primary >=' if direction > 0 else 'CEILING primary <='} {ch['quality_floor']}")
         switch = [r for r in st["rows"] if r.get("event") == "phase" and r.get("to") == "efficiency"]
         if switch and best:
             at_switch = [d for d in st["decisions"].values() if d.get("decision") in KEEPS and d["at"] <= switch[-1]["at"]]
             if at_switch:
-                top = current_value(ws, at_switch[-1], eff_metric=eff_metric)[0]
-                now = current_value(ws, best, eff_metric=eff_metric)[0]
-                drop = top - now
-                md = (ch.get("noise") or {}).get("min_delta") or 0.0
-                lines.append(f"DRIFT since phase switch: {top:.4f} -> {now:.4f} ({-drop:+.4f})"
-                             + ("  <- cumulative drop exceeds min_delta: check holdout before cutting further"
-                                if drop > md else ""))
+                top, _, top_stale = current_value(ws, at_switch[-1], eff_metric=eff_metric)
+                now, _, now_stale = current_value(ws, best, eff_metric=eff_metric)
+                if top_stale or now_stale or not _finite(top) or not _finite(now):
+                    lines.append("DRIFT unavailable: phase-switch or current runs need rescoring")
+                else:
+                    drop = direction * (top - now)
+                    md = ch.get("loop", {}).get("min_delta") or (ch.get("noise") or {}).get("min_delta") or 0.0
+                    lines.append(f"DRIFT since phase switch: {top:.4f} -> {now:.4f} (quality {-drop:+.4f})"
+                                 + ("  <- cumulative degradation exceeds min_delta: check holdout before cutting further"
+                                    if drop > md else ""))
     lines.append(f"STALL {r['stall']} non-keeps since last keep; groups since: {r['groups_since']}")
     lines.append("LEVERS kept/tried: " + ", ".join(f"{g} {k}/{t}" for g, (k, t) in sorted(r["tried"].items()))
                  + f" | untried: {r['untried']}")
     L = lim["limits"]
-    ai_free = [d for d in st["decisions"].values() if d.get("ai_free") and d.get("primary") is not None]
+    ai_free = []
+    for decision in st["decisions"].values():
+        if decision.get("ai_free"):
+            primary, _, stale = current_value(ws, decision, eff_metric=eff_metric)
+            if not stale and _finite(primary):
+                ai_free.append(dict(decision, primary=primary))
     if ai_free:
-        bf = max(ai_free, key=lambda d: d["primary"])
+        bf = max(ai_free, key=lambda d: direction * d["primary"])
         md = (ch.get("noise") or {}).get("min_delta") or 0.0
-        gap = (best["primary"] - bf["primary"]) if best else None
+        best_p, _, best_stale = current_value(ws, best, eff_metric=eff_metric)
+        gap = direction * (best_p - bf["primary"]) if best and not best_stale and _finite(best_p) else None
         note = " <- within noise of the best: report that the model may be unnecessary" if (
             gap is not None and gap <= md) else ""
         lines.append(f"NO-LLM best {bf['exp']} {bf['candidate']} primary={bf['primary']:.4f} (gap {gap}){note}")
@@ -533,7 +585,12 @@ def print_status(ws, compact=False, write=False):
 
 
 def cmd_history(ws):
+    ch = load_charter(ws)
+    direction = _direction(ch)
+    _direction(ch, "item_direction")
     st = _state(ws)
+    print(f"Primary direction: {'max (higher is better)' if direction > 0 else 'min (lower is better)'}; "
+          "positive delta means improvement.")
     print("| exp | lever | candidate | hypothesis | primary | delta | eff | decision | reason |")
     print("|---|---|---|---|---|---|---|---|---|")
     for e in sorted(st["props"], key=lambda x: int(x.lstrip("E")) if x.lstrip("E").isdigit() else 0):
@@ -555,7 +612,9 @@ def cmd_compare(a):
     def items(x):
         p = Path(x)
         return read_json(p / "score.json", {}).get("items", [])
-    pi = paired_items(items(a.run_a), items(a.run_b))
+    ch = load_charter(a.ws)
+    _direction(ch)
+    pi = _paired_quality(ch, items(a.run_a), items(a.run_b))
     print(json.dumps({k: pi[k] for k in ("n", "improved", "regressed", "delta_mean", "band", "p")}))
     print("improved:", pi["improved_ids"][:a.top])
     print("regressed:", pi["regressed_ids"][:a.top])
@@ -595,7 +654,7 @@ def main():
     ph = sub.add_parser("phase")
     ph.add_argument("ws")
     ph.add_argument("to", choices=["quality", "efficiency"])
-    ph.add_argument("--floor", type=float)
+    ph.add_argument("--floor", type=float, help="primary lower bound for max, upper bound for min")
     ph.add_argument("--reason", default="")
     cl = sub.add_parser("clock")
     cl.add_argument("ws")
@@ -628,6 +687,8 @@ def main():
     elif a.cmd == "phase":
         ws = Path(a.ws)
         ch = load_charter(ws)
+        direction = _direction(ch)
+        _direction(ch, "item_direction")
         st = _state(ws)
         floor = a.floor
         if floor is None and a.to == "efficiency" and st["best"]:
@@ -635,13 +696,13 @@ def main():
             cur, _, stale = current_value(ws, st["best"], eff_metric=ch.get("efficiency_metric"))
             if stale:
                 sys.exit("the best experiment's runs are stale (eval changed): rescore them before setting a floor")
-            floor = cur - md
+            floor = cur - direction * md
         append_jsonl(ws / "ledger.jsonl", {"event": "phase", "from": ch.get("phase", "quality"), "to": a.to,
                                            "floor": floor, "reason": a.reason, "at": now_iso()})
         ch["phase"] = a.to
         ch["quality_floor"] = floor
         write_json(ws / "charter.json", ch)
-        print(f"phase -> {a.to}; quality floor = {floor}")
+        print(f"phase -> {a.to}; quality {'floor' if direction > 0 else 'ceiling'} = {floor}")
     elif a.cmd == "clock":
         rows = [r for r in ledger_rows(a.ws) if r.get("event") == "clock"]
         state = rows[-1]["action"] if rows else "resume"

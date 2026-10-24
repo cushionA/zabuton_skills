@@ -300,13 +300,60 @@ def load_reference(ws, split):
     return ref
 
 
+def json_label_equal(left, right):
+    """Compare JSON labels without Python's bool/number equality coercion.
+
+    Finite JSON numbers compare numerically (1 equals 1.0), objects ignore key
+    order, and arrays retain their order. Non-JSON values and cyclic containers
+    never compare equal, including when a value is compared with itself.
+    """
+    def compare(a, b, ancestors):
+        if a is None or b is None:
+            return a is None and b is None
+        if type(a) is bool or type(b) is bool:
+            return type(a) is bool and type(b) is bool and a is b
+        if type(a) in (int, float) and type(b) in (int, float):
+            if (type(a) is float and not math.isfinite(a)) or (type(b) is float and not math.isfinite(b)):
+                return False
+            return a == b
+        if type(a) is str or type(b) is str:
+            return type(a) is str and type(b) is str and a == b
+        if type(a) is not type(b) or type(a) not in (list, dict):
+            return False
+        pair = (id(a), id(b))
+        if pair in ancestors:
+            return False
+        ancestors.add(pair)
+        try:
+            if type(a) is list:
+                return len(a) == len(b) and all(compare(x, y, ancestors) for x, y in zip(a, b))
+            return (all(type(k) is str for k in a) and all(type(k) is str for k in b)
+                    and a.keys() == b.keys() and all(compare(a[k], b[k], ancestors) for k in a))
+        finally:
+            ancestors.remove(pair)
+
+    try:
+        return compare(left, right, set())
+    except RecursionError:
+        return False
+
+
 def label_matches(pred, entry):
-    """True if pred satisfies a reference entry (label or acceptable set)."""
-    if entry is None or entry.get("exclude"):
+    """True if pred satisfies a valid reference label or acceptable-label set."""
+    if entry is None:
         return None
+    if not isinstance(entry, dict):
+        return False
+    if entry.get("exclude") is True:
+        return None
+    if entry.get("exclude"):
+        return False
     if "acceptable" in entry:
-        return any(pred == x for x in entry["acceptable"])
-    return pred == entry.get("label")
+        labels = entry["acceptable"]
+        return (isinstance(labels, list) and bool(labels)
+                and all(json_label_equal(label, label) for label in labels)
+                and any(json_label_equal(pred, label) for label in labels))
+    return "label" in entry and json_label_equal(pred, entry["label"])
 
 
 # ---------------------------------------------------------------- prices / cost
