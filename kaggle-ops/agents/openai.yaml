@@ -1,0 +1,4 @@
+interface:
+  display_name: "Kaggle操作"
+  short_description: "Kaggleのデータ転送・GPU実行・ログ待機と結果回収を管理する"
+  default_prompt: "$kaggle-ops でGPU残量と実験条件を確認し、Kaggleで実行してログと結果を回収してください。"

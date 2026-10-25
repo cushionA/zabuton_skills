@@ -1,0 +1,14 @@
+# Datasetマウント失敗
+
+`failure_message` に `mount data: ERRORED_MOUNTING_DATASET`、`retry budget exhausted`、`dataset loading failed` などがある場合、Notebook開始前の入力準備段階で失敗している。モデルのOOMや推論コードの不具合と決めつけず、対象ref/versionとstatusメッセージを保存する。
+
+## 確認と修復
+
+1. versionを固定してstatusを取得し、ユーザー報告とAPIからの観測を区別して記録する。稼働中または状態不明なら、既存ジョブを新規提出へ置き換えない。
+2. 入力Datasetのversion、private設定、ready状態、実際のファイル一覧とbytesを確認する。readyはDataset取り込みの状態であり、Notebookへのマウント成功を保証しない。ZIPがアップロード後に大量のファイルへ自動展開されていないか確認する。
+3. 元アーカイブ、manifest、ラベル、入力のSHAを保持する。修復候補として、アーカイブbytesを変えずに新versionへ保存し、Notebook内でSHA検証後に展開する配置を検討できる。拡張子変更だけで自動展開されなくなると決めつけず、Datasetのファイル一覧が期待する構成と一致することを確認する。
+4. 過去Dataset versionを削除しない。新versionのready、識別情報、private設定、ファイル名とbytesを記録する。Notebook側では必要なマウントパス候補を明示的に扱い、複数候補が曖昧な場合はエラーにする。SHA・パス・symlinkの検査を維持する。
+5. 既存ジョブが失敗済みで、試行がユーザーの許可とGPU予算に収まる場合に限り、修復した入力配置で新しいNotebook versionを提出する。新しいjobディレクトリに保存し、以前のjob記録を上書きしない。原因についての仮説と、修復後に観測できた事実を分ける。
+6. Notebook開始後は入力探索、アーカイブSHA検査、展開、モデル処理の開始と終了をflushして記録する。マウント自体が失敗した場合、Notebook内ログはまだ書かれていないため、status APIのfailure_messageを使う。
+
+提出受理はマウント成功や評価完了を証明しない。ファイル数や容量が根本原因だったと断定するには、修復後の観測など別の証拠が必要。

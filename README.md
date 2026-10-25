@@ -8,16 +8,19 @@
 | --- | --- | --- |
 | [slack-off-police](slack-off-police/) | 作業ディレクトリの進捗を定期チェックし、サボっていたらYouTube等のプロセスを強制終了する | Windows |
 | [claude-cli-headless](claude-cli-headless/) | `claude -p` をスクリプトから呼ぶときの罠（引数の壊れ方・インジェクション対策・出力パース）をまとめた参照用スキル | 全OS |
+| [codex-cli-headless](codex-cli-headless/) | `codex exec` をスクリプトやCIから非対話で呼ぶときの書き方（stdin入力・構造化JSON出力・権限の絞り方・Windowsでの起動）をまとめた参照用スキル | 全OS（Codex CLIが必要） |
 | [scraping-procedure-deck](scraping-procedure-deck/) | Webの操作・取得手順を、編集可能な赤枠・番号とデータレイアウト表付きのPowerPoint資料にする | Python / Playwright、描画はPowerPointまたはLibreOffice |
+| [research-repro-radar](research-repro-radar/) | 話題の新しい論文・小型モデル・AI駆動開発手法を拾い、短時間で簡易検証して、効果の大きいものや深掘り価値のあるものを報告する | Python、Claude CodeまたはCodex。メール送信はSMTP設定が必要。GitHub Actionsの定期実行は停止中で、手動実行のみ |
 | [simple-plan-auditor](simple-plan-auditor/) | 作業計画の抜け、今必要な判断、根拠・確認方法、着手できる範囲を整理する | Claude Web・デスクトップ / Claude Code |
 | [simple-plan-auditor-en](simple-plan-auditor-en/) | Simple Plan Auditor の英語版。英語のPlanを同じ考え方で整理・監査する | 全OS |
 | [ai-task-autotuner](ai-task-autotuner/) | テストデータからAIタスク（分類・抽出・突合・検索など）を設計し、データ監査→独立した設計レビュー→固定評価→実測の採用／破棄ループで精度、次に効率を自律改善する | Codex CLI / Claude Code、Python 3.10+ |
+| [kaggle-ops](kaggle-ops/) | GPUが必要な計算だけをKaggleのNotebookで実行する。GPU残量の確認、データセット転送、提出、ログの待機、結果の回収に加え、固定したref/versionの常設監視と停止要求、データセットのマウント失敗への対処を扱い、曖昧な提出を自動で再送しない | Python、Kaggle APIトークンが必要 |
 
 ## 使い方
 
 ### Claude Web・デスクトップで Simple Plan Auditor を使う
 
-1. `simple-plan-auditor/` フォルダ全体をZIPにする。ZIPの最上位にこのフォルダを置き、配下の `SKILL.md`、`references/`、`scripts/`、`assets/`、`examples/` の階層を保つ。
+1. `simple-plan-auditor/` フォルダ全体をZIPにする（英語版は `simple-plan-auditor-en/`）。ZIPの最上位にこのフォルダを置き、配下の `SKILL.md`、`references/`、`scripts/`、`assets/`、`examples/` の階層を保つ。
 2. Claudeの「Customize → Skills」からZIPをアップロードし、有効にする。Skillsと「Code execution and file creation」が利用可能な設定になっている必要がある。組織アカウントでは管理者の設定も適用される。[公式の追加手順](https://support.claude.com/en/articles/12512180-use-skills-in-claude)
 3. 計画書と必要な資料を添付し、次のように依頼する。
 
@@ -32,12 +35,36 @@ tar -a -c -f "$env:TEMP\simple-plan-auditor.zip" --exclude __pycache__ simple-pl
 ### Claude Codeで使う
 
 `~/.claude/skills/<スキル名>` にこのリポジトリ内のスキルディレクトリを配置（またはジャンクション/シンボリックリンク）すると、
-Claude Code が自動で読み込む。
+Claude Code が自動で読み込み、`/スキル名` で呼べる。
 
 ```powershell
 # 例: リポジトリを参照するジャンクションを作る（管理者権限不要）
 cmd /c mklink /J "$env:USERPROFILE\.claude\skills\slack-off-police" "<このリポジトリ>\slack-off-police"
 ```
+
+リポジトリ内のスキルをまとめて配置する場合（すでにあるものは飛ばす）：
+
+```powershell
+Get-ChildItem "<このリポジトリ>" -Directory | Where-Object { Test-Path (Join-Path $_.FullName "SKILL.md") } | ForEach-Object {
+    $link = Join-Path "$env:USERPROFILE\.claude\skills" $_.Name
+    if (-not (Test-Path $link)) { New-Item -ItemType Junction -Path $link -Target $_.FullName | Out-Null }
+}
+```
+
+### Claude Codeのマーケットプレイスで使う
+
+このリポジトリは Claude Code のプラグインマーケットプレイス（名前は `zabuton-skills`、定義は [.claude-plugin/marketplace.json](.claude-plugin/marketplace.json)）にもなっている。スキルごとに別のプラグインなので、入れたいものだけ選べる。
+
+```text
+/plugin marketplace add cushionA/zabuton_skills
+/plugin install simple-plan-auditor@zabuton-skills
+```
+
+- プラグインのスキルは `/<プラグイン名>:<スキル名>` で呼ぶ（例: `/simple-plan-auditor:simple-plan-auditor`）。
+- プラグイン名はスキル名と同じ。ただし `claude-cli-headless` は `cc-cli-headless` にしている（`claude-` で始まる名前は Anthropic 公式のものとして予約され、新しい `claude plugin validate` がエラーにするため）。
+- バージョンは指定せず、コミットごとに更新される。
+- 上のジャンクションで配置済みのスキルは入れない（同じスキルが2つ現れる）。
+- 入れたスキルはキャッシュにコピーされ、更新で置き換わる。スキルのフォルダに状態を書くものは、ジャンクションで使う。research-repro-radar は `state/`（既報・繰り越し）が更新で消える。slack-off-police はタスクスケジューラへスクリプトの実パスを登録するので、更新でパスが変わると動かなくなる。
 
 ## Simple Plan Auditor
 
@@ -49,6 +76,8 @@ cmd /c mklink /J "$env:USERPROFILE\.claude\skills\slack-off-police" "<このリ�
 - **修正点の明示:** 承認済みの計画に後から変更を入れたときは、先頭の「今回の修正」に意味が変わった箇所だけを R1, R2… で示し、本文の対応箇所にも同じIDを付ける。作成中や監査での修正は載せない。
 
 [スキルの指示](simple-plan-auditor/SKILL.md) / [CSV一括登録のサンプルプラン](simple-plan-auditor/examples/sample-plan.md) / [修正版の例](simple-plan-auditor/examples/sample-plan-revision.md) / [English version](simple-plan-auditor-en/)
+
+英語版（`simple-plan-auditor-en/`）は、指示・書式・例・スクリプトのメッセージを英語にしただけで、構成、補助スクリプト、テストは日本語版と同じ。
 
 補助スクリプトはPython標準ライブラリだけを使用する。リポジトリのルートからサンプルを確認する例：
 
@@ -170,6 +199,8 @@ python -B -m unittest discover -s ai-task-autotuner/tests
 - `.claude/settings.local.json` などのローカル設定
 - スキルが生成する `.slack-off-police.yaml` / ログ
 - `slack-off-police/assets/` に置く音声ファイル（著作物になりうる）
+- `research-repro-radar/state/` の実行状態（既報ID・繰り越しキュー・送信履歴）
+- `.env` / `.env.*`、`*.key`、`*.pem`、`.mcp.json` などの認証情報
 
 ## ライセンス
 

@@ -1,0 +1,54 @@
+{
+  "name": "zabuton-skills",
+  "description": "cushionA の Claude 向けスキル集。スキルごとに個別のプラグインとして入れられる。",
+  "owner": {
+    "name": "cushionA"
+  },
+  "plugins": [
+    {
+      "name": "slack-off-police",
+      "source": "./slack-off-police",
+      "description": "作業ディレクトリの進捗を定期チェックし、サボっていたらYouTube等のプロセスを強制終了する（Windows専用）"
+    },
+    {
+      "name": "cc-cli-headless",
+      "source": "./claude-cli-headless",
+      "description": "`claude -p` をスクリプトから呼ぶときの罠（引数の壊れ方・インジェクション対策・出力パース）をまとめた参照用スキル"
+    },
+    {
+      "name": "codex-cli-headless",
+      "source": "./codex-cli-headless",
+      "description": "`codex exec` をスクリプトやCIから非対話で呼ぶときの書き方（stdin入力・構造化JSON出力・権限の絞り方・Windowsでの起動）をまとめた参照用スキル"
+    },
+    {
+      "name": "scraping-procedure-deck",
+      "source": "./scraping-procedure-deck",
+      "description": "Webの操作・取得手順を、編集可能な赤枠・番号とデータレイアウト表付きのPowerPoint資料にする"
+    },
+    {
+      "name": "research-repro-radar",
+      "source": "./research-repro-radar",
+      "description": "話題の新しい論文・小型モデル・AI駆動開発手法を拾い、短時間で簡易検証して、効果の大きいものや深掘り価値のあるものを報告する"
+    },
+    {
+      "name": "simple-plan-auditor",
+      "source": "./simple-plan-auditor",
+      "description": "作業計画の抜け、今必要な判断、根拠・確認方法、着手できる範囲を整理する"
+    },
+    {
+      "name": "simple-plan-auditor-en",
+      "source": "./simple-plan-auditor-en",
+      "description": "English version of Simple Plan Auditor. Organizes and audits English work plans: gaps, decisions needed now, evidence, and the scope that can proceed."
+    },
+    {
+      "name": "kaggle-ops",
+      "source": "./kaggle-ops",
+      "description": "GPUが必要な計算だけをKaggleのNotebookで実行し、GPU残量の確認・データセット転送・提出・ログの待機・結果の回収、固定したjobの常設監視と停止要求を行う"
+    },
+    {
+      "name": "ai-task-autotuner",
+      "source": "./ai-task-autotuner",
+      "description": "テストデータからAIタスクを設計し、データ監査・独立した設計レビュー・固定評価・実測の採用／破棄ループで精度、次に効率を自律改善する"
+    }
+  ]
+}
